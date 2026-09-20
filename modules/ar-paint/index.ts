@@ -23,6 +23,7 @@ export type ArTrackingEvent = {
 
 /** What the reticle is on: plane = detected geometry (locked), extended = known plane's extension, mesh = LiDAR, estimated = feature points. */
 export type HitKind = 'plane' | 'extended' | 'mesh' | 'estimated' | 'none';
+/** `drip` is only sent by builds made before paint stopped running; it is ignored. */
 export type ArHitEvent = { hit: boolean; distance: number; drip?: boolean; kind?: HitKind; vertical?: boolean; locked?: boolean };
 
 export type ArPaintViewProps = ViewProps & {
@@ -40,6 +41,10 @@ export type ArPaintViewProps = ViewProps & {
 
 export type ArPaintViewRef = {
   saveWorldMap: (path: string) => Promise<{ bytes: number; anchors: number }>;
+  /** Writes a JPEG of the camera frame + paint (no reticle, no surface grids) to `path`. Needs a native rebuild: guard with `canSnapshot`. */
+  snapshot: (path: string) => Promise<{ width: number; height: number; bytes: number }>;
+  /** Repaints the wall without your last stroke of this session and returns it. Guard with `canUndo`. */
+  undoLast: () => Promise<{ id: string; anchorId: string } | null>;
   /** mode 'absolute' (default): same world map as this session. 'relative': no map — place from where the painter stood, relative to the camera now. */
   addStrokes: (strokes: ArStroke[], mode?: 'absolute' | 'relative') => Promise<void>;
   clearAll: () => Promise<void>;
@@ -49,4 +54,8 @@ export type ArPaintViewRef = {
 const NativeModule = requireNativeModule('ArPaint');
 export const isArSupported: boolean = !!NativeModule.isSupported;
 export const hasLidar: boolean = !!NativeModule.hasLidar;
+/** False on binaries built before wall photos existed, so the UI can hide the capture button. */
+export const canSnapshot: boolean = !!NativeModule.hasSnapshot;
+/** False on binaries built before undo existed, so the UI can hide the undo button. */
+export const canUndo: boolean = !!NativeModule.hasUndo;
 export const ArPaintView = requireNativeView<ArPaintViewProps & { ref?: Ref<ArPaintViewRef> }>('ArPaint');

@@ -15,6 +15,12 @@ import type { Canvas, Painter, Stroke } from '../types';
 const CACHE_CANVASES = 'tagged:cache:canvases';
 const CACHE_STROKES = 'tagged:cache:strokes:';
 const PENDING = 'tagged:pending';
+/** Strokes carry every dab, so a queue that never drains is measured in megabytes. Keep the newest. */
+const PENDING_MAX = 120;
+/** Rows the server will never take as they are (missing column = migration_ar.sql hasn't been run). */
+const SCHEMA_ERRORS = ['42703', 'PGRST204'];
+let schemaBlocked = false; // stops the retry storm for this session once the shape is rejected
+let flushing = false;
 
 export function applyStroke(s: Stroke) {
   const st = useStore.getState();
@@ -123,28 +129,57 @@ export async function uploadStroke(s: Stroke) {
     console.warn('uploadStroke failed, queued', e);
     useStore.getState().setOnline(false);
     try {
-      const q = JSON.parse((await AsyncStorage.getItem(PENDING)) ?? '[]');
+      const q: unknown[] = JSON.parse((await AsyncStorage.getItem(PENDING)) ?? '[]');
       q.push(row);
+      if (q.length > PENDING_MAX) q.splice(0, q.length - PENDING_MAX); // never let the queue eat the phone
       await AsyncStorage.setItem(PENDING, JSON.stringify(q));
     } catch {}
   }
 }
 
+/**
+ * Retry queued strokes. Runs on a timer, so it has to stay cheap and bounded no matter how long the
+ * backend has been refusing them: one flush at a time, at most ROW_RETRIES single-row retries, and
+ * if the server rejects the shape itself (a column the schema doesn't have yet) it stops for this
+ * session instead of re-uploading the whole queue every 15 s.
+ */
+const ROW_RETRIES = 20;
 export async function flushPending() {
-  if (!hasBackend) return;
+  if (!hasBackend || schemaBlocked || flushing) return;
+  flushing = true;
   try {
-    const q: any[] = JSON.parse((await AsyncStorage.getItem(PENDING)) ?? '[]');
+    const raw = (await AsyncStorage.getItem(PENDING)) ?? '[]';
+    // A queue this big is the result of the backend refusing strokes for hours; parsing it whole is
+    // itself enough to get the app jetsammed, so drop it. The paint is still cached locally and on
+    // the wall — only the upload of that backlog is lost, which was never going to succeed anyway.
+    if (raw.length > 8_000_000) {
+      console.warn(`dropping a ${Math.round(raw.length / 1e6)} MB stroke backlog that the backend kept refusing`);
+      await AsyncStorage.removeItem(PENDING);
+      return;
+    }
+    const q: any[] = JSON.parse(raw);
     if (!q.length) return;
     const { error } = await supabase.from('strokes').upsert(q, { onConflict: 'id' });
     if (!error) { await AsyncStorage.removeItem(PENDING); return; }
-    // batch failed: retry row by row and drop rows that can never succeed (FK / RLS / duplicate)
+    if (SCHEMA_ERRORS.includes(error.code ?? '')) {
+      schemaBlocked = true;
+      console.warn(`stroke upload is blocked by the database schema (${error.message}). Run supabase/migration_ar.sql, then reopen the app.`);
+      if (q.length > PENDING_MAX) await AsyncStorage.setItem(PENDING, JSON.stringify(q.slice(-PENDING_MAX)));
+      return;
+    }
+    // batch failed for some other reason: retry a few rows and drop the ones that can never succeed
+    // (FK / RLS / duplicate). Anything not reached this time stays queued for the next flush.
+    const head = q.slice(0, ROW_RETRIES);
     const keep: any[] = [];
-    for (const row of q) {
+    for (const row of head) {
       const { error: e } = await supabase.from('strokes').upsert(row, { onConflict: 'id' });
+      if (e && SCHEMA_ERRORS.includes(e.code ?? '')) { schemaBlocked = true; keep.push(row); break; }
       if (e && !['23503', '42501', '23505'].includes(e.code ?? '')) keep.push(row);
     }
-    await AsyncStorage.setItem(PENDING, JSON.stringify(keep));
-  } catch {}
+    await AsyncStorage.setItem(PENDING, JSON.stringify([...keep, ...q.slice(ROW_RETRIES)].slice(-PENDING_MAX)));
+  } catch (e) {
+    console.warn('flushPending failed', e);
+  } finally { flushing = false; }
 }
 
 export function subscribeRealtime() {
@@ -194,6 +229,24 @@ export async function fetchAllCanvases(): Promise<Canvas[]> {
   const { data, error } = await supabase.from('canvases').select('*').eq('flagged', false).order('created_at', { ascending: false }).limit(200);
   if (error) throw error;
   return data as Canvas[];
+}
+
+/**
+ * Take a stroke off the shared wall (undo). The app has already dropped it locally and remembers
+ * the id, because `strokes` has no delete policy yet: until Hamza adds one this call is refused and
+ * the stroke stays on other phones. Also drops it from the retry queue if it never made it up.
+ */
+export async function deleteStroke(id: string) {
+  try {
+    const q: { id: string }[] = JSON.parse((await AsyncStorage.getItem(PENDING)) ?? '[]');
+    const left = q.filter((r) => r.id !== id);
+    if (left.length !== q.length) await AsyncStorage.setItem(PENDING, JSON.stringify(left));
+  } catch {}
+  if (!hasBackend) return;
+  try {
+    const { error } = await supabase.from('strokes').delete().eq('id', id);
+    if (error) throw error;
+  } catch (e) { console.warn('deleteStroke failed (strokes needs an RLS delete policy)', e); }
 }
 
 /** Strokes for canvases that aren't nearby, for thumbnails only (no raster replay). */

@@ -27,3 +27,8 @@ grant execute on function set_world_map(uuid, text) to authenticated;
 -- AR strokes may record where the painter stood (camera world position, same frame as `transform`)
 -- so other clients can project the stroke as seen from that spot rather than from the session origin.
 alter table strokes add column if not exists viewer jsonb;
+
+-- Undo: the painter may delete their own stroke (without this, undo only takes the paint off
+-- the painter's own phone and the stroke stays on everyone else's).
+drop policy if exists "delete own stroke" on strokes;
+create policy "delete own stroke" on strokes for delete using (auth.uid() = author_id);

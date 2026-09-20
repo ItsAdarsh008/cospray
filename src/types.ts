@@ -1,6 +1,6 @@
 import type { Cap } from './config';
 
-/** [yaw, pitch, size(deg), alpha, kind] — kind 0 = spray dab centre, 1 = drip. Canvas-relative degrees. */
+/** [yaw, pitch, size(deg), alpha, kind] — kind 0 = spray dab centre, 1 = a drip from an older build (never drawn now). Canvas-relative degrees. */
 export type StrokePoint = [number, number, number, number, number];
 
 export type Stroke = {

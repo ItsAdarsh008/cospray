@@ -17,15 +17,17 @@ your paint stays on that spot for everyone who walks up to it later. Built for H
 | Area | Status |
 |---|---|
 | Spray loop (shake → hold → paint on ARKit surfaces → sync) | **real**, unchanged |
-| Input | **real**: on-screen hold buttons always visible (one per can) + volume rocker in parallel (toggle in Settings) |
+| Input | **real**: two colours, one on-screen hold button each (always visible) + volume rocker in parallel (toggle in Settings). No fat/skinny caps: line width comes from the SIZE tool |
 | Launch globe → tap zooms into Waterloo | **real** (Skia wireframe globe, orbiting logo; not a textured 3D earth) |
 | Onboarding (handle + avatar colour + permissions, one screen) | **real**; identity = Supabase anonymous session — enable *Anonymous sign-ins* in Authentication → Providers. If it's off the same screen unfolds email + password. Avatar colour is local-only (no column) |
-| Dock (Home / Explore / Create / Social / Vault / Settings) | **real** (expo-blur glass, haptics, spring pill). Market skipped on purpose |
-| Home: can status, paint gauges + refill timer, shake test, daily stats | **real** (stats computed from locally cached strokes; streak = consecutive days with a stroke) |
+| Dock: Profile · Vault · **Create** · Explore · Social | **real**. The app opens on Create (the raised centre key); your side on the left, the world on the right. Market and Settings slide up as sheets from Profile (Market also from the Create tools tray) |
+| Create overlay | **real**: charge rail, undo + the piece so far on the right, the two colour buttons + a tools tray (colour per button, size, opacity), one surface hint that disappears once a wall locks, one notice at a time (blockers, discovery, first-run tip). Social info (author, views, report) lives in the piece page, reached from the found card |
+| Undo (Create, top right) | **real**: repaints that wall from the strokes that remain, so paint someone else put over the top survives, and deletes the row. Needs the `delete own stroke` policy (in `schema.sql` / `migration_ar.sql`) — without it the stroke stays on other phones, and the app remembers the id so it can't come back on yours |
+| Profile: can status, paint gauges + refill timer, daily quests, daily stats | **real** (stats computed from locally cached strokes; streak = consecutive days with a stroke) |
 | Explore: trending + nearby | **real backend data**; `src/data/mock.ts` sample spots appear only when the wall is empty (labelled "sample") |
 | Social: stat card → share sheet | **real** (view snapshot → PNG → iOS share sheet). Friends / activity lists = **stubs** in `src/data/mock.ts` |
-| Vault: grid of your pieces + detail (render, location, stats) | **real**; "photo" = a re-render of the strokes, there is no camera capture. No 360° viewer |
-| Settings | real toggles; About section static |
+| Vault: grid of your pieces + detail (photo, location, stats) | **real**. Create photographs the wall (camera frame + paint) a few seconds after you spray and after an undo; photos live on the phone, so other people's pieces fall back to the paint rendered on a brick wall |
+| Settings | real toggles (input, AR surfaces, debug line, geofence); About section static |
 | Widgets (small/medium + lock screen): equipped colour swatches, paint gauges + refill countdown, streak, stats | **real** (`targets/widget`, App Group). Countdown assumes the in-app regen rate; paint only regenerates while the app is open |
 | Web `/world`, `/gallery` | **real** Supabase reads + realtime; samples only when empty |
 
@@ -35,7 +37,9 @@ Cut this pass: Market tab, social auth, 360° viewer, friends backend, a texture
 
 ```sh
 npm install
-# 1) backend: paste supabase/schema.sql, then supabase/seed.sql, into the Supabase SQL editor
+# 1) backend: paste supabase/schema.sql, then supabase/migration_ar.sql (the AR columns,
+#    world-map bucket and undo policy), then supabase/seed.sql, into the Supabase SQL editor.
+#    Pointing the app at your own Supabase project: see deploy.md
 # 2) native build onto your iPhone (once; later changes are JS-only):
 npx expo run:ios --device          # or: eas build --profile development --platform ios
 # 3) dev server (any port; the dev client asks for the URL / scans the QR):
@@ -56,8 +60,8 @@ eas build --profile development --platform ios   # then install from the link/QR
 
 Open → sign in with email + password (same button creates the account) → pick a tag →
 **shake the phone** (ball rattle, can charge fills) → hold **VOL+** and sweep
-across a wall (hiss + haptics, paint meter drains) → hold **VOL−** for the second colour/cap →
-dwell on one spot to pool and drip → paint runs low (hollow rattle) → walk toward a seeded
+across a wall (hiss + haptics, paint meter drains) → hold **VOL−** for the second colour →
+undo a stroke you don't like → paint runs low (hollow rattle) → walk toward a seeded
 piece near E7 → shimmer/edge arrow pulls you in → it resolves from a smear into a piece →
 "YOU FOUND A PIECE by …", views tick up → BOARD tab shows the leaderboard.
 
@@ -142,10 +146,12 @@ Used only when ARKit is unavailable:
 
 ## Spray rendering (Curtis et al. adapted cheaply)
 
-`Wall.dab()`: low-alpha soft dabs composited source-over (pigment **buildup** with repeated
-passes), a faint darker halo wider than the body (**edge darkening** where blobs overlap only
-at rims), seeded-RNG alpha jitter and overspray speckle (**granulation**, deterministic across
-phones), and dwell-triggered **drips** that run down the wall.
+`Wall.dab()` (and its Swift twin in `modules/ar-paint`): a hard, nearly opaque core plus a few
+softer blobs composited source-over (pigment **buildup** with repeated passes), a faint darker
+halo wider than the body (**edge darkening** where blobs overlap only at rims), and seeded-RNG
+alpha jitter with light overspray speckle (**granulation**, deterministic across phones). Paint
+reads as paint rather than mist, and nothing drips: a piece keeps the shape you drew. Drip points
+(`kind = 1`) recorded by older builds are skipped, so old pieces stop running too.
 
 ## Volume buttons as the trigger + fallback
 
@@ -162,8 +168,10 @@ parallel; Settings → "Volume buttons also spray" turns the rocker off if it mi
 
 - **Shake to charge**: user-acceleration spikes fill the can (rattle + heavy haptic). Charge
   decays to empty over 60 s; below 12 % the spray weakens then stops ("SHAKE CAN").
-- **Paint economy**: per option, 100 units; fat cap ~5.5/s, skinny ~3.5/s; regen 2.2/s while
-  not spraying that option; empty can can't spray (empty-can rattle).
+- **Paint economy**: per colour, 100 units; ~4.5/s at size M (bigger sizes burn more); regen 2.2/s while
+  not spraying that colour; empty can can't spray (empty-can rattle).
+- **Paint look**: solid, not misty — each tick lays a hard core plus a little buildup, and dwelling
+  on a spot no longer starts a drip, so a piece keeps the shape you drew.
 - **Haptics**: light impacts at ~14 Hz while paint flows, soft when weak; success on discovery.
 - **Geofence**: 25 km circle over Waterloo Region (`GEOFENCE` in `src/config.ts`); bypass toggle
   in Settings for testing elsewhere.
@@ -186,7 +194,7 @@ show an info chip + report button.
 | `strokes` | `canvas_id`, colour, cap, `points` jsonb `[[yaw,pitch,size,alpha,kind],…]`, `paint_used` |
 | `reports` | trigger bumps `canvases.flags`; 2 reports → `flagged` (hidden everywhere) |
 
-RPCs: `nearby_canvases(lat,lng,radius_m)` (haversine), `increment_views(cid)`. Realtime on
+RPCs: `nearby_canvases(lat,lng,radius_m)` (haversine), `increment_views(cid)`. Undo deletes a stroke row, which needs the `delete own stroke` policy. Realtime on
 `strokes`/`canvases` inserts so a second phone sees strokes live; polling every 15 s as backup.
 Auth is Supabase email + password (`src/screens/AuthScreen.tsx`): one button signs in, or
 creates the account if it doesn't exist. RLS: everyone can read; inserts require
@@ -201,13 +209,13 @@ discover art without a second phone.
 ## Home-screen + lock-screen widgets
 
 `targets/widget` (via `@bacons/apple-targets`, plugin listed in `app.json` so EAS/prebuild generate
-the extension target) is a WidgetKit extension. Families: **small** (two colour swatches with cap
+the extension target) is a WidgetKit extension. Families: **small** (two colour swatches with colour
 names, three bars, streak), **medium** (swatches, both gauges with a live "full in mm:ss" countdown,
 streak, can charge, all-time strokes/paint), and lock screen **rectangular / circular / inline**
 (colours + levels + streak). Add it from the iOS widget gallery under "Fresco Can".
 
 Data flow: the app mirrors state into the App Group `group.com.hamzakhan.tagged`
-(`src/lib/widget.ts`: `paintA/B`, `colorA/B`, `capA/B`, `shake`, `refillAtA/B`, `streak`, `strokes`,
+(`src/lib/widget.ts`: `paintA/B`, `colorA/B`, `nameA/B`, `shake`, `refillAtA/B`, `streak`, `strokes`,
 `paintUsed`, `tag`) at most once every 3 s while it changes, then asks WidgetKit to reload; the
 widget also refreshes itself every 15 min. Countdown assumes the in-app regen rate (paint only
 regenerates while the app is open). Building needs the App Groups capability on the app id:
@@ -218,13 +226,14 @@ regenerates while the app is open). Building needs the App Groups capability on 
 All SFX are **procedurally generated** by `scripts/gen_sfx.py` (numpy → WAV, 44.1 kHz mono),
 so there are no licensing questions: `rattle.wav` (ball clicks), `empty_rattle.wav` (hollow
 can + resonance), `hiss.wav` (filtered noise, seamless 1 s loop; volume/rate follow spray
-strength and aim pitch as a distance proxy), `pool.wav` (bubbling blips), `click.wav` (nozzle).
+strength and aim pitch as a distance proxy), `click.wav` (nozzle). `pool.wav` is no longer played
+(it went with the drips).
 Played via `expo-audio` (expo-av is deprecated in SDK 57).
 
 ## Layout
 
 ```
-App.tsx                  launch → onboarding → dock shell (home/explore/create/social/vault/settings)
+App.tsx                  launch → onboarding → dock shell (home/vault/create/explore/social) + market/settings sheets
 src/ui/*                 Dock, Glass, StrokeThumb, theme;  src/data/mock.ts  every stub in one place
 src/screens/*            Launch, Onboarding, Home, Explore, ArPaint/Paint (create), Social, Vault, Settings
 src/config.ts            every tunable

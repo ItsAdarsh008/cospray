@@ -1,5 +1,5 @@
 import { BlurStyle, Skia, type SkCanvas, type SkImage, type SkSurface } from '@shopify/react-native-skia';
-import { CAP_RADIUS_DEG, WALL_PITCH_RANGE, WALL_PX_PER_DEG, WALL_YAW_RANGE, type Cap } from '../config';
+import { WALL_PITCH_RANGE, WALL_PX_PER_DEG, WALL_YAW_RANGE } from '../config';
 import { seededRng } from '../lib/ids';
 import type { Stroke, StrokePoint } from '../types';
 
@@ -20,7 +20,8 @@ export const WALL_H = 2 * WALL_PITCH_RANGE * WALL_PX_PER_DEG;
  *                   spray blob (their backrun / edge darkening);
  *  - granulation:   per-dab alpha jitter + overspray speckle from a seeded RNG (their paper
  *                   granulation), deterministic so every phone renders the same speckle;
- *  - drips:         dwelling on one spot pools paint which runs down (kind = 1 points).
+ *  - drips:         gone. Paint stays where you sprayed it, and kind = 1 points from older
+ *                   strokes are skipped rather than drawn.
  */
 export class Wall {
   readonly id: string;
@@ -72,47 +73,29 @@ export class Wall {
     const r = radiusDeg * WALL_PX_PER_DEG;
     const dark = darken(color, 0.72);
     // edge-darkening halo
-    c.drawCircle(x, y, r * 0.95, this.paint(dark, alpha * 0.07, r * 0.28));
-    // scattered soft body
-    for (let i = 0; i < 5; i++) {
-      const a = rng() * Math.PI * 2, d = gauss(rng) * r * 0.45;
+    c.drawCircle(x, y, r * 0.98, this.paint(dark, alpha * 0.1, r * 0.22));
+    // scattered body: barely blurred, so passes build solid colour instead of haze
+    for (let i = 0; i < 4; i++) {
+      const a = rng() * Math.PI * 2, d = gauss(rng) * r * 0.36;
       const px = x + Math.cos(a) * d, py = y + Math.sin(a) * d;
-      c.drawCircle(px, py, r * 0.5, this.paint(color, alpha * (0.22 + 0.16 * rng()), r * 0.32));
+      c.drawCircle(px, py, r * 0.55, this.paint(color, alpha * (0.34 + 0.16 * rng()), r * 0.16));
     }
     // dense core
-    c.drawCircle(x, y, r * 0.24, this.paint(color, alpha * 0.55, r * 0.14));
+    c.drawCircle(x, y, r * 0.46, this.paint(color, alpha * 0.9, r * 0.05));
     // overspray speckle
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 2; i++) {
       const a = rng() * Math.PI * 2, d = r * (0.8 + rng() * 0.9);
-      c.drawCircle(x + Math.cos(a) * d, y + Math.sin(a) * d, r * 0.06 + rng() * r * 0.05, this.paint(color, alpha * 0.5, 0));
+      c.drawCircle(x + Math.cos(a) * d, y + Math.sin(a) * d, r * 0.06 + rng() * r * 0.05, this.paint(color, alpha * 0.45, 0));
     }
-    this.dirty = true;
-  }
-
-  /** A run of paint downward from (yaw, pitch), lengthDeg long. */
-  drip(yaw: number, pitch: number, lengthDeg: number, alpha: number, color: string, rng: () => number) {
-    const c = this.canvas; if (!c) return;
-    const { x, y } = Wall.toPx(yaw, pitch);
-    const len = lengthDeg * WALL_PX_PER_DEG;
-    const w = (0.18 + rng() * 0.12) * WALL_PX_PER_DEG;
-    const steps = Math.max(4, Math.floor(len / (w * 0.6)));
-    let px = x + (rng() - 0.5) * w;
-    for (let i = 0; i <= steps; i++) {
-      const t = i / steps;
-      px += (rng() - 0.5) * w * 0.35;
-      const rr = w * (1 - 0.45 * t);
-      c.drawCircle(px, y + len * t, rr, this.paint(color, alpha * (0.75 - 0.35 * t), rr * 0.25));
-    }
-    // the blob at the end of the run
-    c.drawCircle(px, y + len, w * 0.9, this.paint(darken(color, 0.85), alpha * 0.7, w * 0.35));
-    c.drawCircle(x, y, w * 2.2, this.paint(darken(color, 0.8), alpha * 0.25, w * 0.8)); // pooled source
     this.dirty = true;
   }
 
   applyPoint(p: StrokePoint, color: string, rng: () => number) {
     const [yaw, pitch, size, alpha, kind] = p;
-    if (kind === 1) this.drip(yaw, pitch, size, alpha, color, rng);
-    else this.dab(yaw, pitch, size, alpha, color, rng);
+    // kind 1 is a drip from an older build. Paint doesn't run any more, so it isn't drawn at all
+    // (the rng still advances, so every client skips it the same way).
+    if (kind === 1) { rng(); return; }
+    this.dab(yaw, pitch, size, alpha, color, rng);
   }
 
   replay(stroke: Stroke) {
@@ -133,8 +116,6 @@ export class Wall {
     return this.image;
   }
 }
-
-export function capRadius(cap: Cap) { return CAP_RADIUS_DEG[cap]; }
 
 function gauss(rng: () => number) {
   // Box–Muller, clamped

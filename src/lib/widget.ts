@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import { ExtensionStorage } from '@bacons/apple-targets';
 import { useStore } from '../store';
 import { PAINT_MAX, PAINT_REGEN_PER_SEC } from '../config';
+import { colorName } from './economy';
 
 /** Mirrors paint levels into the App Group so the home-screen widget (targets/widget) can show the can. */
 const APP_GROUP = 'group.com.hamzakhan.tagged';
@@ -16,7 +17,7 @@ export function startWidgetSync() {
     const st = useStore.getState();
     const snap = {
       paintA: Math.round(st.paint.A), paintB: Math.round(st.paint.B), shake: Math.round(st.shake * 100),
-      colorA: st.settings.optionA.color, colorB: st.settings.optionB.color, capA: st.settings.optionA.cap, capB: st.settings.optionB.cap,
+      colorA: st.settings.optionA.color, colorB: st.settings.optionB.color, nameA: colorName(st.settings.optionA.color), nameB: colorName(st.settings.optionB.color),
       tag: st.painter?.name ?? 'FRESCO', strokes: st.painter?.strokes ?? 0, paintUsed: Math.round(st.painter?.paint_used ?? 0),
       // when each can is full again at the in-app regen rate (unix seconds; widget shows a countdown)
       refillAtA: Math.floor(Date.now() / 1000 + (PAINT_MAX - st.paint.A) / PAINT_REGEN_PER_SEC),
@@ -29,7 +30,7 @@ export function startWidgetSync() {
     try {
       storage!.set('paintA', snap.paintA); storage!.set('paintB', snap.paintB); storage!.set('shake', snap.shake);
       storage!.set('colorA', snap.colorA); storage!.set('colorB', snap.colorB); storage!.set('tag', snap.tag);
-      storage!.set('capA', snap.capA); storage!.set('capB', snap.capB); storage!.set('strokes', snap.strokes); storage!.set('paintUsed', snap.paintUsed);
+      storage!.set('nameA', snap.nameA); storage!.set('nameB', snap.nameB); storage!.set('strokes', snap.strokes); storage!.set('paintUsed', snap.paintUsed);
       storage!.set('refillAtA', snap.refillAtA); storage!.set('refillAtB', snap.refillAtB); storage!.set('streak', snap.streak);
       storage!.set('updatedAt', Math.floor(Date.now() / 1000));
       ExtensionStorage.reloadWidget();

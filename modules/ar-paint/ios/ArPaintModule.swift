@@ -7,7 +7,9 @@ public class ArPaintModule: Module {
 
     Constants([
       "isSupported": ARWorldTrackingConfiguration.isSupported,
-      "hasLidar": ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh)
+      "hasLidar": ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh),
+      "hasSnapshot": true,
+      "hasUndo": true
     ])
 
     View(ArPaintView.self) {
@@ -30,6 +32,15 @@ public class ArPaintModule: Module {
       }
       AsyncFunction("addStrokes") { (view: ArPaintView, strokes: [[String: Any]], mode: String?) in
         view.addRemoteStrokes(strokes, mode: mode ?? "absolute")
+      }
+      AsyncFunction("snapshot") { (view: ArPaintView, path: String, promise: Promise) in
+        DispatchQueue.main.async {
+          do { promise.resolve(try view.snapshot(to: path)) }
+          catch { promise.reject("E_SNAPSHOT", error.localizedDescription) }
+        }
+      }
+      AsyncFunction("undoLast") { (view: ArPaintView, promise: Promise) in
+        DispatchQueue.main.async { promise.resolve(view.undoLast()) }
       }
       AsyncFunction("clearAll") { (view: ArPaintView) in view.clearAll() }
       AsyncFunction("resetSession") { (view: ArPaintView) in view.restartSession(worldMap: nil) }

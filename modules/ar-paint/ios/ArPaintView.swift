@@ -8,7 +8,10 @@ import SceneKit
 /// the anchor's plane (u = anchor +X, v = anchor −Z), which is what gets persisted and shared.
 final class PaintNode {
   static let sizeM: CGFloat = 5.0
-  static let px = 2048
+  /// 1024 over 5 m is ~5 mm per pixel, which is finer than the spray can resolve — and a quarter of
+  /// the memory of 2048, which matters because every quad on a wall holds one of these plus the
+  /// texture uploaded from it.
+  static let px = 1024
   static var pxPerM: CGFloat { CGFloat(px) / sizeM }
 
   let id: String
@@ -69,8 +72,9 @@ final class PaintNode {
     return CGPoint(x: (u + h) * PaintNode.pxPerM, y: (v + h) * PaintNode.pxPerM)
   }
 
-  /// Curtis-style cheap spray: faint darker halo (edge darkening), scattered soft body (buildup),
-  /// dense core, overspray speckle.
+  /// Cheap spray that reads as paint rather than mist: a faint darker rim (edge darkening), a few
+  /// soft blobs for buildup, then a hard, nearly opaque core. Overspray is kept light so a second
+  /// pass covers the surface instead of hazing it.
   func dab(u: CGFloat, v: CGFloat, radiusM: CGFloat, alpha: CGFloat, color: UIColor, rng: inout SplitMix) {
     let c = pixel(u: u, v: v)
     let r = max(2, radiusM * PaintNode.pxPerM)
@@ -78,39 +82,52 @@ final class PaintNode {
     color.getRed(&cr, green: &cg, blue: &cb, alpha: &ca)
     let dark = UIColor(red: cr * 0.72, green: cg * 0.72, blue: cb * 0.72, alpha: 1)
 
-    softCircle(at: c, r: r * 0.95, color: dark, alpha: alpha * 0.07)
-    for _ in 0..<5 {
+    softCircle(at: c, r: r * 0.98, color: dark, alpha: alpha * 0.10, hard: 0.35)
+    for _ in 0..<4 {
       let a = rng.next() * 2 * .pi
-      let d = rng.gauss() * r * 0.45
-      softCircle(at: CGPoint(x: c.x + cos(a) * d, y: c.y + sin(a) * d), r: r * 0.5, color: color, alpha: alpha * (0.22 + 0.16 * rng.next()))
+      let d = rng.gauss() * r * 0.36
+      softCircle(at: CGPoint(x: c.x + cos(a) * d, y: c.y + sin(a) * d), r: r * 0.55, color: color, alpha: alpha * (0.34 + 0.16 * rng.next()), hard: 0.4)
     }
-    softCircle(at: c, r: r * 0.24, color: color, alpha: alpha * 0.55, hard: 0.5)
-    for _ in 0..<3 {
+    softCircle(at: c, r: r * 0.46, color: color, alpha: alpha * 0.9, hard: 0.8)
+    for _ in 0..<2 {
       let a = rng.next() * 2 * .pi
       let d = r * (0.8 + rng.next() * 0.9)
       let sr = r * (0.06 + rng.next() * 0.05)
-      ctx.setFillColor(color.withAlphaComponent(alpha * 0.5).cgColor)
+      ctx.setFillColor(color.withAlphaComponent(alpha * 0.45).cgColor)
       ctx.fillEllipse(in: CGRect(x: c.x + cos(a) * d - sr, y: c.y + sin(a) * d - sr, width: sr * 2, height: sr * 2))
     }
     dirty = true
   }
 
-  /// A run of paint downward from (u, v): pooling when you dwell on a spot.
-  func drip(u: CGFloat, v: CGFloat, lengthM: CGFloat, alpha: CGFloat, color: UIColor, rng: inout SplitMix) {
-    let w = (0.004 + rng.next() * 0.003) * PaintNode.pxPerM
-    let start = pixel(u: u, v: v)
-    let len = lengthM * PaintNode.pxPerM
-    let steps = max(4, Int(len / (w * 0.6)))
-    var x = start.x + (rng.next() - 0.5) * w
-    for i in 0...steps {
-      let t = CGFloat(i) / CGFloat(steps)
-      x += (rng.next() - 0.5) * w * 0.35
-      let rr = w * (1 - 0.45 * t)
-      softCircle(at: CGPoint(x: x, y: start.y - len * t), r: rr, color: color, alpha: alpha * (0.75 - 0.35 * t), hard: 0.6)
+  /// Every stroke composited into this texture, kept so undo can rebuild the texture without one.
+  struct Painted { let id: String; let colorHex: String; let points: [[Double]] }
+  private(set) var history: [Painted] = []
+
+  /// Records a stroke that is already on the texture (the one you just sprayed, dab by dab).
+  func record(_ p: Painted) { history.append(p) }
+  /// Records and paints a stroke that isn't on the texture yet (another phone's, or a past session's).
+  func add(_ p: Painted) { history.append(p); replay(p) }
+
+  /// Seeded per stroke id, so the speckle lands identically on every phone and on every repaint.
+  private func replay(_ p: Painted) {
+    var rng = SplitMix(seed: p.id)
+    let color = UIColor(hex: p.colorHex)
+    for pt in p.points where pt.count >= 4 {
+      // kind 1 is a drip from an older build. Paint doesn't run any more, so it isn't drawn at all
+      // (the rng still advances, so every phone skips it the same way).
+      if pt.count > 4 && pt[4] == 1 { _ = rng.next(); continue }
+      dab(u: CGFloat(pt[0]), v: CGFloat(pt[1]), radiusM: CGFloat(pt[2]), alpha: CGFloat(pt[3]), color: color, rng: &rng)
     }
-    softCircle(at: CGPoint(x: x, y: start.y - len), r: w * 0.9, color: color, alpha: alpha * 0.7, hard: 0.5)
-    softCircle(at: start, r: w * 2.2, color: color, alpha: alpha * 0.25)
+  }
+
+  /// Drops a stroke and rebuilds the texture from the ones that are left.
+  func remove(strokeId: String) -> Bool {
+    guard let i = history.lastIndex(where: { $0.id == strokeId }) else { return false }
+    history.remove(at: i)
+    ctx.clear(CGRect(x: 0, y: 0, width: PaintNode.px, height: PaintNode.px))
+    for p in history { replay(p) }
     dirty = true
+    return true
   }
 
   private func softCircle(at c: CGPoint, r: CGFloat, color: UIColor, alpha: CGFloat, hard: CGFloat = 0.0) {
@@ -190,8 +207,8 @@ final class ArPaintView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   private struct StrokeRec { var id: String; var nodeId: String; var points: [[Double]]; var rng: SplitMix; var color: String; var viewer: [Double] }
   private var loadedMapAnchorNames = Set<String>()
   private var stroke: StrokeRec?
-  private var lastDab: (u: CGFloat, v: CGFloat, t: CFTimeInterval)?
-  private var dwellSince: CFTimeInterval = 0
+  /// Strokes you painted this session, newest last — what undo walks back through.
+  private var myStrokes: [(nodeId: String, strokeId: String)] = []
   private var lastTick: CFTimeInterval = 0
 
   /// What the reticle is on. plane = detected plane geometry (locked), extended = the infinite
@@ -296,6 +313,35 @@ final class ArPaintView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   func clearAll() {
     for p in paintNodes.values { p.node.removeFromParentNode() }
     paintNodes.removeAll()
+  }
+
+  /// Takes back your most recent stroke in this session: its quad is repainted from the strokes
+  /// that remain, so other people's paint over the top survives. Returns the stroke id for the app
+  /// to drop from the shared wall, or nil when you have nothing left to undo here.
+  func undoLast() -> [String: Any]? {
+    while let last = myStrokes.popLast() {
+      guard let node = paintNodes[last.nodeId], node.remove(strokeId: last.strokeId) else { continue }
+      node.uploadIfNeeded(now: CACurrentMediaTime(), force: true)
+      return ["id": last.strokeId, "anchorId": last.nodeId]
+    }
+    return nil
+  }
+
+  /// A photo of the wall as you're seeing it: the camera frame with the paint composited on top,
+  /// written to `path` as JPEG. The reticle and the surface grids are hidden for the shot, so it
+  /// looks like a picture of the piece rather than a screenshot of the app.
+  func snapshot(to path: String) throws -> [String: Any] {
+    let hidReticle = reticle.isHidden
+    reticle.isHidden = true
+    planeNodes.values.forEach { $0.isHidden = true }
+    let image = sceneView.snapshot()
+    reticle.isHidden = hidReticle
+    planeNodes.values.forEach { $0.isHidden = !showPlanes }
+    guard let data = image.jpegData(compressionQuality: 0.85) else {
+      throw NSError(domain: "ArPaint", code: 2, userInfo: [NSLocalizedDescriptionKey: "could not encode the photo"])
+    }
+    try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+    return ["width": Int(image.size.width), "height": Int(image.size.height), "bytes": data.count]
   }
 
   // MARK: reticle + plane visuals
@@ -437,7 +483,7 @@ final class ArPaintView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
 
     if spraying, let h = hit, now - lastTick >= 1.0 / 30.0 {
       lastTick = now
-      paintAt(h, now: now)
+      paintAt(h)
     }
     for p in paintNodes.values { p.uploadIfNeeded(now: now) }
   }
@@ -451,8 +497,6 @@ final class ArPaintView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
 
   private func beginStroke() {
     lastTick = 0
-    lastDab = nil
-    dwellSince = CACurrentMediaTime()
     stroke = nil // created lazily on first hit so the anchor is the surface we actually hit
   }
 
@@ -464,6 +508,8 @@ final class ArPaintView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     guard let s = stroke else { return }
     stroke = nil
     guard !s.points.isEmpty, let node = paintNodes[s.nodeId] else { return }
+    node.record(PaintNode.Painted(id: s.id, colorHex: s.color, points: s.points))
+    myStrokes.append((nodeId: s.nodeId, strokeId: s.id))
     node.uploadIfNeeded(now: CACurrentMediaTime(), force: true)
     onStrokeEnd([
       "id": s.id, "anchorId": s.nodeId, "transform": flatten(node.transform), "color": s.color, "points": s.points, "viewer": s.viewer,
@@ -533,7 +579,9 @@ final class ArPaintView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     addAnchor(for: node)
   }
 
-  private func paintAt(_ hit: Hit, now: CFTimeInterval) {
+  /// One spray tick. Dwelling on a spot used to start a drip; paint now stays where it was sprayed
+  /// and only builds up, which is what you want when you're actually trying to draw something.
+  private func paintAt(_ hit: Hit) {
     let node = nodeFor(hit: hit)
     if stroke == nil || stroke!.nodeId != node.id {
       flushStroke()
@@ -545,21 +593,9 @@ final class ArPaintView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     let p = simd_float3(t.columns.3.x, t.columns.3.y, t.columns.3.z)
     let l = node.local(p)
     let r = radius * (0.85 + 0.3 * flow)
-    let a = 0.16 * flow
+    let a = 0.28 * flow
     node.dab(u: l.u, v: l.v, radiusM: r, alpha: a, color: paintColor, rng: &stroke!.rng)
     stroke!.points.append([Double(l.u), Double(l.v), Double(r), Double(a), 0])
-
-    // dwell → pooling drip
-    if let last = lastDab, hypot(l.u - last.u, l.v - last.v) < 0.02 {
-      if now - dwellSince > 1.1 {
-        dwellSince = now
-        let len = 0.05 + stroke!.rng.next() * 0.12
-        node.drip(u: l.u, v: l.v - r * 0.3, lengthM: len, alpha: 0.6 * flow, color: paintColor, rng: &stroke!.rng)
-        stroke!.points.append([Double(l.u), Double(l.v - r * 0.3), Double(len), Double(0.6 * flow), 1])
-        onHit(["hit": true, "distance": 0, "drip": true])
-      }
-    } else { dwellSince = now }
-    lastDab = (l.u, l.v, now)
   }
 
   /// Strokes from other phones / previous sessions: [{id, anchorId, transform:[16], color, points:[[u,v,r,a,kind]], viewer:[3]}]
@@ -597,13 +633,7 @@ final class ArPaintView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
         }
         if node.loose { attachLooseNodeToNearbyPlane(node) }
       }
-      var rng = SplitMix(seed: id)
-      let color = UIColor(hex: colorHex)
-      for p in pts where p.count >= 4 {
-        let kind = p.count > 4 ? p[4] : 0
-        if kind == 1 { _ = rng.next(); node.drip(u: CGFloat(p[0]), v: CGFloat(p[1]), lengthM: CGFloat(p[2]), alpha: CGFloat(p[3]), color: color, rng: &rng) }
-        else { node.dab(u: CGFloat(p[0]), v: CGFloat(p[1]), radiusM: CGFloat(p[2]), alpha: CGFloat(p[3]), color: color, rng: &rng) }
-      }
+      node.add(PaintNode.Painted(id: id, colorHex: colorHex, points: pts))
       node.uploadIfNeeded(now: CACurrentMediaTime(), force: true)
     }
   }

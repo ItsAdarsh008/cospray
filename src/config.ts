@@ -27,7 +27,7 @@ export const GEOFENCE_BYPASS_DEFAULT = false;
 
 // ---- Paint economy ---------------------------------------------------------
 export const PAINT_MAX = 100;
-export const PAINT_COST_PER_SEC = { fat: 5.5, skinny: 3.5 }; // ~18-28s of continuous spray per can
+export const PAINT_COST_PER_SEC = 4.5; // ~22s of continuous spray per can at size M
 export const PAINT_REGEN_PER_SEC = 2.2;
 export const PAINT_EMPTY_THRESHOLD = 1;
 export const PAINT_LOW_THRESHOLD = 18; // "hollow rattle" territory
@@ -43,11 +43,13 @@ export const VOLUME_BASELINE = 0.5;
 export const VOLUME_HOLD_TIMEOUT_MS = 380; // no repeat event for this long = released
 
 // ---- Spray ----------------------------------------------------------------
-export type Cap = 'fat' | 'skinny';
-export type SprayOption = { color: string; cap: Cap; name: string };
-export const DEFAULT_OPTION_A: SprayOption = { color: '#ff2d95', cap: 'fat', name: 'Hot pink · fat cap' };
-export const DEFAULT_OPTION_B: SprayOption = { color: '#19e6ff', cap: 'skinny', name: 'Cyan · skinny cap' };
+// Each can is just a colour: one nozzle, and line width comes from the Create SIZE tool.
+export type SprayOption = { color: string; name: string };
+export const DEFAULT_OPTION_A: SprayOption = { color: '#ff2d95', name: 'Hot pink' };
+export const DEFAULT_OPTION_B: SprayOption = { color: '#19e6ff', name: 'Cyan' };
 export const PALETTE = ['#ff2d95', '#19e6ff', '#ffe600', '#7cff3a', '#ff5c1a', '#b26bff', '#ffffff', '#111111'];
-export const CAP_RADIUS_DEG: Record<Cap, number> = { fat: 2.6, skinny: 1.15 };
-export const DWELL_POOL_SECONDS = 1.1; // hold on one spot this long → pooling + drips
-export const DWELL_RADIUS_DEG = 1.2;
+export const SPRAY_RADIUS_DEG = 1.9; // compass mode, size M
+export const SPRAY_RADIUS_M = 0.042; // ARKit, size M
+/** strokes.cap is a not-null column from when cans had fat/skinny nozzles; every stroke is now written with this. */
+export type Cap = 'fat' | 'skinny';
+export const STROKE_CAP: Cap = 'fat';

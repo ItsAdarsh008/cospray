@@ -88,7 +88,8 @@
         }
       ],
       "expo-dev-client",
-      "@bacons/apple-targets"
+      "@bacons/apple-targets",
+      "expo-asset"
     ],
     "extra": {
       "eas": {

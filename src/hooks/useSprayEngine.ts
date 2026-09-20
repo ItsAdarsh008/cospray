@@ -1,13 +1,15 @@
 import { useEffect, useRef } from 'react';
 import * as Haptics from 'expo-haptics';
 import {
-  CANVAS_JOIN_RADIUS_M, DWELL_POOL_SECONDS, DWELL_RADIUS_DEG, GEOFENCE, PAINT_COST_PER_SEC, PAINT_EMPTY_THRESHOLD,
+  CANVAS_JOIN_RADIUS_M, GEOFENCE, PAINT_COST_PER_SEC, PAINT_EMPTY_THRESHOLD,
   PAINT_LOW_THRESHOLD, PAINT_MAX, PAINT_REGEN_PER_SEC, SHAKE_DECAY_SECONDS, SHAKE_GAIN_PER_EVENT, SHAKE_MIN_TO_SPRAY,
+  SPRAY_RADIUS_DEG, STROKE_CAP,
 } from '../config';
 import { haversineM, wrap360, wrapDiff } from '../lib/geo';
 import { uuid } from '../lib/ids';
 import { seededRng } from '../lib/ids';
-import { capRadius, getWall } from '../paint/Wall';
+import { getWall } from '../paint/Wall';
+import { OPACITY, THICKNESS } from '../lib/economy';
 import { sfx } from '../audio/sfx';
 import { useStore, type Side } from '../store';
 import { createCanvas, uploadStroke } from '../data/sync';
@@ -20,7 +22,7 @@ export type Blocker = null | 'no-location' | 'outside-geofence' | 'shake' | 'emp
  * The spray simulation. Runs a ~30Hz tick while a trigger is held:
  *  - picks/creates the canvas you're standing at,
  *  - composites dabs into that wall at the reticle (view centre),
- *  - depletes paint, decays the can charge, detects dwell → pooling/drips,
+ *  - depletes paint and decays the can charge,
  *  - drives hiss + haptics, and records the stroke for upload on release.
  */
 export function useSprayEngine(pose: React.MutableRefObject<Pose>) {
@@ -28,7 +30,6 @@ export function useSprayEngine(pose: React.MutableRefObject<Pose>) {
   const stroke = useRef<Stroke | null>(null);
   const rng = useRef<() => number>(() => Math.random());
   const activeCanvas = useRef<Canvas | null>(null);
-  const dwell = useRef<{ yaw: number; pitch: number; since: number; pooled: boolean }>({ yaw: 0, pitch: 0, since: 0, pooled: false });
   const lastLowRattle = useRef(0);
   const lastTick = useRef(0);
   const hapticsAt = useRef(0);
@@ -109,11 +110,10 @@ export function useSprayEngine(pose: React.MutableRefObject<Pose>) {
     const opt = side === 'A' ? st.settings.optionA : st.settings.optionB;
     const s: Stroke = {
       id: uuid(), canvas_id: canvas.id, author_id: st.painter?.id ?? null, author_name: st.painter?.name ?? 'anon',
-      color: opt.color, cap: opt.cap, points: [], paint_used: 0, created_at: new Date().toISOString(),
+      color: opt.color, cap: STROKE_CAP, points: [], paint_used: 0, created_at: new Date().toISOString(),
     };
     stroke.current = s;
     rng.current = seededRng(s.id);
-    dwell.current = { yaw: pose.current.yaw, pitch: pose.current.pitch, since: Date.now(), pooled: false };
     lastTick.current = Date.now();
     sprayingNow.current = true;
     if (st.settings.sound) sfx.click();
@@ -165,30 +165,21 @@ export function useSprayEngine(pose: React.MutableRefObject<Pose>) {
       const pr = pose.current;
       const yaw = wrapDiff(pr.yaw, canvas.heading);
       const pitch = pr.pitch;
-      const radius = capRadius(opt.cap) * (0.75 + 0.35 * strength);
-      const alpha = 0.16 * flow;
+      // Create tools: SIZE scales the dab, OPACITY scales how much pigment each dab lays down
+      const th = THICKNESS[st.settings.thickness]?.mult ?? 1;
+      const op = OPACITY[st.settings.opacity]?.mult ?? 1;
+      const radius = SPRAY_RADIUS_DEG * th * (0.75 + 0.35 * strength);
+      const alpha = 0.3 * flow * op;
       const wall = getWall(canvas.id);
       if (st.debug.surface !== wall.backend) st.setDebug({ surface: wall.backend });
       const pt: StrokePoint = [round2(yaw), round2(pitch), round2(radius), round2(alpha), 0];
       wall.applyPoint(pt, opt.color, rng.current);
       s.points.push(pt);
 
-      // dwell → pooling + drips
-      const d = dwell.current;
-      const moved = Math.hypot(wrapDiff(yaw, d.yaw), pitch - d.pitch);
-      if (moved > DWELL_RADIUS_DEG) { d.yaw = yaw; d.pitch = pitch; d.since = now; d.pooled = false; }
-      else if (!d.pooled && now - d.since > DWELL_POOL_SECONDS * 1000) {
-        d.pooled = true;
-        const dp: StrokePoint = [round2(yaw + (rng.current() - 0.5) * radius), round2(pitch - radius * 0.4), round2(2 + rng.current() * 3.5), round2(0.6 * flow), 1];
-        wall.applyPoint(dp, opt.color, rng.current);
-        s.points.push(dp);
-        if (st.settings.sound) sfx.pool();
-        if (st.settings.haptics) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Soft).catch(() => {});
-        d.since = now; // allow another drip after another dwell period
-        setTimeout(() => { d.pooled = false; }, 600);
-      }
+      // Dwelling on a spot used to start a drip. Paint now stays where it was sprayed and only
+      // builds up, so a piece keeps the shape you drew.
 
-      const cost = PAINT_COST_PER_SEC[opt.cap] * step * (0.6 + 0.4 * strength);
+      const cost = PAINT_COST_PER_SEC * step * (0.6 + 0.4 * strength) * (0.7 + 0.3 * th); // fatter lines burn more paint
       s.paint_used += cost;
       st.setPaint(side, Math.max(0, st.paint[side] - cost));
       st.bumpWalls();

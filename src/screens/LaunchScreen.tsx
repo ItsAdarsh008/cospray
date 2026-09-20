@@ -3,8 +3,8 @@ import { Dimensions, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Canvas, Circle, Group, Path, Skia, BlurMask, RadialGradient, vec } from '@shopify/react-native-skia';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming, runOnJS } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
-import { LinearGradient } from 'expo-linear-gradient';
-import { C } from '../ui/theme';
+import { Backdrop } from '../ui/Backdrop';
+import { C, F, outline, uiLabel } from '../ui/theme';
 
 const { width: W, height: H } = Dimensions.get('window');
 const R = Math.min(W, H) * 0.34;
@@ -72,17 +72,17 @@ export function LaunchScreen({ onEnter }: { onEnter: () => void }) {
 
   return (
     <Pressable style={styles.root} onPress={enter}>
-      <LinearGradient colors={['#12081c', '#07070c', '#02030a']} style={StyleSheet.absoluteFill} />
+      <Backdrop tone="night" />
       <Animated.View style={[StyleSheet.absoluteFill, globeStyle]}>
         <Canvas style={StyleSheet.absoluteFill}>
           {/* atmosphere */}
-          <Circle cx={CX} cy={CY} r={R * 1.12} color={C.cyan} opacity={0.35}><BlurMask blur={26} style="normal" /></Circle>
+          <Circle cx={CX} cy={CY} r={R * 1.12} color={C.phosphor} opacity={0.35}><BlurMask blur={26} style="normal" /></Circle>
           <Circle cx={CX} cy={CY} r={R}>
             <RadialGradient c={vec(CX - R * 0.35, CY - R * 0.4)} r={R * 1.4} colors={['#1b2440', '#0a0d1c', '#03040a']} />
           </Circle>
-          <Path path={back} style="stroke" strokeWidth={1} color={C.cyan} opacity={0.12} />
-          <Path path={front} style="stroke" strokeWidth={1.2} color={C.cyan} opacity={0.55} />
-          <Circle cx={CX} cy={CY} r={R} style="stroke" strokeWidth={1.5} color={C.cyan} opacity={0.8} />
+          <Path path={back} style="stroke" strokeWidth={1} color={C.phosphor} opacity={0.12} />
+          <Path path={front} style="stroke" strokeWidth={1.2} color={C.phosphor} opacity={0.55} />
+          <Circle cx={CX} cy={CY} r={R} style="stroke" strokeWidth={1.5} color={C.phosphor} opacity={0.8} />
           {CITIES.map((c, i) => { const p = project(c.lat, c.lng, spin); if (p.z < 0) return null; return <Circle key={i} cx={p.sx} cy={p.sy} r={2.2 + p.z * 1.5} color={i === 0 ? C.pink : C.yellow} opacity={0.5 + 0.5 * p.z} />; })}
           {wl.z >= 0 && (
             <Group>
@@ -92,9 +92,9 @@ export function LaunchScreen({ onEnter }: { onEnter: () => void }) {
           )}
           {/* orbiting logo: behind the globe on the far half of the ring, in front on the near half */}
           <Group opacity={orb.z > 0 ? 1 : 0.35}>
-            <Circle cx={orb.x} cy={orb.y} r={16 + 4 * orb.z} color={C.pink} opacity={0.5}><BlurMask blur={10} style="normal" /></Circle>
-            <Circle cx={orb.x} cy={orb.y} r={13 + 3 * orb.z} color={C.pink} />
-            <Circle cx={orb.x} cy={orb.y} r={13 + 3 * orb.z} style="stroke" strokeWidth={2} color="#fff" opacity={0.9} />
+            <Circle cx={orb.x} cy={orb.y} r={16 + 4 * orb.z} color={C.yellow} opacity={0.5}><BlurMask blur={10} style="normal" /></Circle>
+            <Circle cx={orb.x} cy={orb.y} r={13 + 3 * orb.z} color={C.yellow} />
+            <Circle cx={orb.x} cy={orb.y} r={13 + 3 * orb.z} style="stroke" strokeWidth={3} color={C.ink} />
           </Group>
         </Canvas>
         <View style={[styles.logoLetter, { left: orb.x - 10, top: orb.y - 12, opacity: orb.z > 0 ? 1 : 0.35 }]} pointerEvents="none"><Text style={styles.logoF}>F</Text></View>
@@ -111,9 +111,9 @@ export function LaunchScreen({ onEnter }: { onEnter: () => void }) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
   logoLetter: { position: 'absolute', width: 20, height: 24, alignItems: 'center', justifyContent: 'center' },
-  logoF: { color: '#fff', fontWeight: '900', fontSize: 16 },
+  logoF: { color: C.ink, fontFamily: F.display, fontSize: 18 },
   copy: { position: 'absolute', left: 0, right: 0, bottom: H * 0.14, alignItems: 'center', gap: 8 },
-  brand: { color: '#fff', fontWeight: '900', fontSize: 46, letterSpacing: 10 },
-  tag: { color: C.dim, fontSize: 15, letterSpacing: 1 },
-  cta: { color: C.pink, fontWeight: '800', fontSize: 12, letterSpacing: 3, marginTop: 18, textTransform: 'uppercase' },
+  brand: { color: '#fff', fontFamily: F.display, fontSize: 56, letterSpacing: 8, ...outline('#4a22b8', 4) },
+  tag: { color: C.dim, fontFamily: F.body, fontSize: 16, letterSpacing: 1 },
+  cta: { color: C.yellow, ...uiLabel(12, 2.5), marginTop: 18 },
 });

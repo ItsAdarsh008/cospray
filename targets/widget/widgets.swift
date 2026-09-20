@@ -4,7 +4,7 @@ import SwiftUI
 // The app writes these keys into the shared App Group UserDefaults (see src/lib/widget.ts):
 //   paintA, paintB (0-100), shake (0-100), colorA, colorB (hex), tag (string), updatedAt (unix seconds),
 //   refillAtA, refillAtB (unix seconds when that can is full again), streak (days),
-//   capA, capB ("fat"/"skinny"), strokes, paintUsed (all-time stats)
+//   nameA, nameB (colour names), strokes, paintUsed (all-time stats)
 let appGroup = "group.com.hamzakhan.tagged"
 
 struct CanEntry: TimelineEntry {
@@ -18,8 +18,8 @@ struct CanEntry: TimelineEntry {
   let refillAtA: Date
   let refillAtB: Date
   let streak: Int
-  let capA: String
-  let capB: String
+  let nameA: String
+  let nameB: String
   let colorAHex: String
   let colorBHex: String
   let strokes: Int
@@ -38,7 +38,7 @@ struct CanEntry: TimelineEntry {
       refillAtA: Date(timeIntervalSince1970: d?.object(forKey: "refillAtA") as? Double ?? 0),
       refillAtB: Date(timeIntervalSince1970: d?.object(forKey: "refillAtB") as? Double ?? 0),
       streak: d?.object(forKey: "streak") as? Int ?? 0,
-      capA: d?.string(forKey: "capA") ?? "fat", capB: d?.string(forKey: "capB") ?? "skinny",
+      nameA: d?.string(forKey: "nameA") ?? "Hot pink", nameB: d?.string(forKey: "nameB") ?? "Cyan",
       colorAHex: d?.string(forKey: "colorA") ?? "#ff2d95", colorBHex: d?.string(forKey: "colorB") ?? "#19e6ff",
       strokes: d?.object(forKey: "strokes") as? Int ?? 0, paintUsed: d?.object(forKey: "paintUsed") as? Int ?? 0)
   }
@@ -100,11 +100,11 @@ struct Gauge: View {
   }
 }
 
-/// Equipped colour: a ring swatch with the cap name. What the user sees first on the home screen.
+/// Equipped colour: a ring swatch with the colour name. What the user sees first on the home screen.
 struct Swatch: View {
   let color: Color
   let label: String
-  let cap: String
+  let name: String
   var size: CGFloat = 26
   var body: some View {
     HStack(spacing: 6) {
@@ -113,7 +113,7 @@ struct Swatch: View {
         .shadow(color: color.opacity(0.7), radius: 4)
       VStack(alignment: .leading, spacing: 0) {
         Text(label).font(.system(size: 9, weight: .heavy)).foregroundStyle(.white)
-        Text(cap + " cap").font(.system(size: 8, weight: .semibold)).foregroundStyle(.white.opacity(0.65))
+        Text(name).font(.system(size: 8, weight: .semibold)).foregroundStyle(.white.opacity(0.65))
       }
     }
   }
@@ -148,8 +148,8 @@ struct PaintCanView: View {
         Text("🔥\(entry.streak)").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.8))
       }
       HStack(spacing: 8) {
-        Swatch(color: entry.colorA, label: "A", cap: entry.capA, size: 22)
-        Swatch(color: entry.colorB, label: "B", cap: entry.capB, size: 22)
+        Swatch(color: entry.colorA, label: "A", name: entry.nameA, size: 22)
+        Swatch(color: entry.colorB, label: "B", name: entry.nameB, size: 22)
       }
       HStack(spacing: 8) {
         CanBar(value: entry.paintA, color: entry.colorA, label: "A")
@@ -169,8 +169,8 @@ struct PaintCanView: View {
           Text(entry.tag).font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
         }
         HStack(spacing: 14) {
-          Swatch(color: entry.colorA, label: "VOL+ · A", cap: entry.capA)
-          Swatch(color: entry.colorB, label: "VOL− · B", cap: entry.capB)
+          Swatch(color: entry.colorA, label: "VOL+ · A", name: entry.nameA)
+          Swatch(color: entry.colorB, label: "VOL− · B", name: entry.nameB)
         }
         Gauge(value: entry.paintA, color: entry.colorA, label: "A", refillAt: entry.refillAtA)
         Gauge(value: entry.paintB, color: entry.colorB, label: "B", refillAt: entry.refillAtB)
@@ -198,9 +198,9 @@ struct PaintCanView: View {
       }
       HStack(spacing: 6) {
         Circle().fill(entry.colorA).frame(width: 10, height: 10).overlay(Circle().stroke(.white, lineWidth: 1))
-        Text("\(Int(entry.paintA))% \(entry.capA)").font(.system(size: 10, weight: .semibold))
+        Text("\(Int(entry.paintA))%").font(.system(size: 10, weight: .semibold))
         Circle().fill(entry.colorB).frame(width: 10, height: 10).overlay(Circle().stroke(.white, lineWidth: 1))
-        Text("\(Int(entry.paintB))% \(entry.capB)").font(.system(size: 10, weight: .semibold))
+        Text("\(Int(entry.paintB))%").font(.system(size: 10, weight: .semibold))
       }
       Text(status).font(.system(size: 9)).opacity(0.8)
     }

@@ -1,7 +1,11 @@
 import 'react-native-url-polyfill/auto';
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Modal, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { useFonts } from 'expo-font';
+import { PixelifySans_400Regular, PixelifySans_500Medium, PixelifySans_600SemiBold, PixelifySans_700Bold } from '@expo-google-fonts/pixelify-sans';
+import { VT323_400Regular } from '@expo-google-fonts/vt323';
+import { Silkscreen_400Regular, Silkscreen_700Bold } from '@expo-google-fonts/silkscreen';
 import { hydrateStore, useStore } from './src/store';
 import { useLocation } from './src/hooks/useLocation';
 import { sfx } from './src/audio/sfx';
@@ -14,17 +18,19 @@ import { PaintScreen } from './src/screens/PaintScreen';
 import { ArPaintScreen } from './src/screens/ArPaintScreen';
 import { isArSupported } from './modules/ar-paint';
 import { startWidgetSync } from './src/lib/widget';
-import { HomeScreen } from './src/screens/HomeScreen';
+import { ProfileScreen } from './src/screens/ProfileScreen';
 import { ExploreScreen } from './src/screens/ExploreScreen';
 import { SocialScreen } from './src/screens/SocialScreen';
 import { VaultScreen } from './src/screens/VaultScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
+import { MarketScreen } from './src/screens/MarketScreen';
 import { Dock } from './src/ui/Dock';
 import { C } from './src/ui/theme';
 
 export default function App() {
   const [ready, setReady] = useState(false);
   const [launched, setLaunched] = useState(false);
+  const [fontsLoaded, fontError] = useFonts({ PixelifySans_400Regular, PixelifySans_500Medium, PixelifySans_600SemiBold, PixelifySans_700Bold, VT323_400Regular, Silkscreen_400Regular, Silkscreen_700Bold });
   useEffect(() => {
     (async () => {
       await hydrateStore();
@@ -33,7 +39,7 @@ export default function App() {
       setReady(true);
     })();
   }, []);
-  if (!ready) return <View style={{ flex: 1, backgroundColor: C.bg }} />;
+  if (!ready || !(fontsLoaded || fontError)) return <View style={{ flex: 1, backgroundColor: C.bg }} />;
   if (!launched) return <><LaunchScreen onEnter={() => setLaunched(true)} /><StatusBar style="light" /></>;
   return <Root />;
 }
@@ -56,6 +62,10 @@ function Root() {
     fetchPainter(session.user.id).then((p) => { setPainter(p); setCheckedFor(session.user.id); }).catch(() => setCheckedFor(session.user.id));
   }, [session?.user.id]);
   const tab = useStore((s) => s.tab);
+  const sheet = useStore((s) => s.sheet);
+  const setSheet = useStore((s) => s.setSheet);
+  const [lastSheet, setLastSheet] = useState(sheet); // keeps the page rendered while the sheet slides away
+  useEffect(() => { if (sheet) setLastSheet(sheet); }, [sheet]);
   const [visitedCreate, setVisitedCreate] = useState(false);
   useEffect(() => { if (tab === 'create') setVisitedCreate(true); }, [tab]);
   const settings = useStore((s) => s.settings);
@@ -88,18 +98,22 @@ function Root() {
 
   return (
     <View style={styles.root}>
-      {tab === 'home' && <HomeScreen />}
-      {tab === 'explore' && <ExploreScreen />}
+      {tab === 'profile' && <ProfileScreen />}
+      {tab === 'vault' && <VaultScreen />}
       {/* the AR view stays mounted once opened: hiding pauses the session and showing resumes it, so paint keeps its anchors across tabs */}
       {isArSupported ? (visitedCreate && (
         <View style={[StyleSheet.absoluteFill, tab !== 'create' && styles.hidden]} pointerEvents={tab === 'create' ? 'auto' : 'none'}>
-          <ArPaintScreen active={tab === 'create'} />
+          <ArPaintScreen active={tab === 'create' && !sheet} />
         </View>
-      )) : tab === 'create' && <PaintScreen />}
+      )) : tab === 'create' && <PaintScreen active={!sheet} />}
+      {tab === 'explore' && <ExploreScreen />}
       {tab === 'social' && <SocialScreen />}
-      {tab === 'vault' && <VaultScreen />}
-      {tab === 'settings' && <SettingsScreen />}
       <Dock />
+      {/* Market and Settings slide up over whatever you were doing (swipe down or X to close) */}
+      <Modal visible={!!sheet} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setSheet(null)}>
+        {(sheet ?? lastSheet) === 'market' && <MarketScreen />}
+        {(sheet ?? lastSheet) === 'settings' && <SettingsScreen />}
+      </Modal>
       <StatusBar style="light" />
     </View>
   );

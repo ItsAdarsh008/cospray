@@ -3,13 +3,12 @@ import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-aud
 /**
  * All SFX are procedurally generated WAVs (scripts/gen_sfx.py) — no licensing, tiny, loopable.
  *  hiss: seamless loop, volume+rate driven by spray strength ("distance" proxy)
- *  rattle / emptyRattle: one-shots; pool: one-shot; click: nozzle press.
+ *  rattle / emptyRattle: one-shots; click: nozzle press.
  */
 class Sfx {
   private hiss?: AudioPlayer;
   private rattleP?: AudioPlayer;
   private emptyP?: AudioPlayer;
-  private poolP?: AudioPlayer;
   private clickP?: AudioPlayer;
   private ready = false;
   enabled = true;
@@ -25,7 +24,6 @@ class Sfx {
     this.hiss.volume = 0;
     this.rattleP = createAudioPlayer(require('../../assets/sfx/rattle.wav'));
     this.emptyP = createAudioPlayer(require('../../assets/sfx/empty_rattle.wav'));
-    this.poolP = createAudioPlayer(require('../../assets/sfx/pool.wav'));
     this.clickP = createAudioPlayer(require('../../assets/sfx/click.wav'));
     this.ready = true;
   }
@@ -43,7 +41,6 @@ class Sfx {
   click() { this.oneShot(this.clickP, 0.6, 0.9 + Math.random() * 0.2); }
   rattle(strength = 1) { this.oneShot(this.rattleP, 0.5 + 0.5 * strength, 0.9 + 0.3 * Math.random()); }
   emptyRattle() { this.oneShot(this.emptyP, 0.9, 1); }
-  pool() { this.oneShot(this.poolP, 0.8, 0.85 + Math.random() * 0.3); }
 
   /** strength 0..1 (can charge × paint), near 0..1 (aim pitch proxy for distance to surface). */
   setHiss(on: boolean, strength: number, near: number) {

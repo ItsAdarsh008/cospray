@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { Btn } from '../ui/kit';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useKeepAwake } from 'expo-keep-awake';
 import { PaintLayer } from '../paint/PaintLayer';
@@ -7,10 +8,12 @@ import { usePose } from '../hooks/usePose';
 import { useSprayEngine, type Blocker } from '../hooks/useSprayEngine';
 import { useVolumeTrigger } from '../hooks/useVolumeTrigger';
 import { useDiscovery } from '../hooks/useDiscovery';
-import { BlockerBanner, CanMeter, HoldButtons, PaintMeters, Reticle } from '../components/HUD';
-import { DiscoveryOverlay } from '../components/DiscoveryOverlay';
+import { BLOCKER_LINE, CreateHud, pullLine, Reticle, type HudLine } from '../components/HUD';
+import { F } from '../ui/theme';
+import { DiscoveryCues } from '../components/DiscoveryOverlay';
+import { PieceDetail } from '../components/SpatialViewer';
 import { useStore } from '../store';
-import { reportCanvas } from '../data/sync';
+import type { Canvas } from '../types';
 
 /**
  * AR APPROACH — geo-anchored canvases (rung 2 of the fallback ladder), chosen deliberately:
@@ -27,14 +30,12 @@ import { reportCanvas } from '../data/sync';
  *    a few metres apart see slightly offset paint. For a campus-scale r/place demo that's
  *    acceptable; the README lists what real plane anchoring would fix.
  */
-export function PaintScreen() {
+export function PaintScreen({ active = true }: { active?: boolean }) {
   useKeepAwake();
   const [perm, requestPerm] = useCameraPermissions();
   const settings = useStore((s) => s.settings);
   const painter = useStore((s) => s.painter);
-  const online = useStore((s) => s.online);
   const location = useStore((s) => s.location);
-  const setTab = useStore((s) => s.setTab);
   const debug = useStore((s) => s.debug);
   const setDebug = useStore((s) => s.setDebug);
   const engineRef = useRef<ReturnType<typeof useSprayEngine> | null>(null);
@@ -44,19 +45,22 @@ export function PaintScreen() {
   const discovery = useDiscovery(pose);
   const discoveryRef = useRef(discovery);
   discoveryRef.current = discovery;
+  const [hinted, setHinted] = useState(true); // first-run hint, hidden after the first spray
+  const [detail, setDetail] = useState<Canvas | null>(null);
 
-  useVolumeTrigger(settings.volumeButtons, { onHoldStart: engine.start, onHoldEnd: engine.end });
+  useVolumeTrigger(settings.volumeButtons && active, { onHoldStart: engine.start, onHoldEnd: engine.end });
+  useEffect(() => { if (!active && engine.held.current) engine.end(engine.held.current); }, [active]);
 
   // cheap UI poll for spray state (engine runs off refs to stay at 30Hz without re-rendering)
-  const [ui, setUi] = useState<{ spraying: boolean; blocker: Blocker; yaw: number }>({ spraying: false, blocker: null, yaw: 0 });
+  const [ui, setUi] = useState<{ spraying: boolean; blocker: Blocker }>({ spraying: false, blocker: null });
   useEffect(() => {
     const id = setInterval(() => {
       const spraying = engine.sprayingNow.current && !engine.blocker.current;
       const blocker = engine.held.current ? engine.blocker.current : null;
-      const yaw = Math.round(pose.current.yaw);
-      setUi((p) => (p.spraying === spraying && p.blocker === blocker && p.yaw === yaw ? p : { spraying, blocker, yaw }));
+      setUi((p) => (p.spraying === spraying && p.blocker === blocker ? p : { spraying, blocker }));
       const d = useStore.getState().debug;
       const held = engine.held.current ?? '-';
+      if (held !== '-') setHinted(false);
       const bl = engine.blocker.current ?? '-';
       if (d.held !== held || d.blocker !== bl || d.walls !== discoveryRef.current.walls.length || d.poseReady !== pose.current.ready)
         setDebug({ held, blocker: bl, walls: discoveryRef.current.walls.length, poseReady: pose.current.ready });
@@ -66,63 +70,44 @@ export function PaintScreen() {
 
   useEffect(() => { if (perm && !perm.granted && perm.canAskAgain) requestPerm(); }, [perm]);
 
-  const onReport = useCallback((id: string) => {
-    Alert.alert('Report this piece?', 'Two reports hide a piece for everyone.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Report', style: 'destructive', onPress: () => reportCanvas(id, painter?.id ?? null, 'inappropriate') },
-    ]);
-  }, [painter]);
-
   if (!perm?.granted) {
     return (
       <View style={styles.center}>
         <Text style={styles.msg}>Camera permission is needed to paint.</Text>
-        <Pressable onPress={requestPerm} style={styles.btn}><Text style={styles.btnText}>Allow camera</Text></Pressable>
+        <Btn label="ALLOW CAMERA" tone="green" onPress={requestPerm} />
       </View>
     );
   }
+
+  const found = discovery.justFound;
+  const notice: HudLine | null = ui.blocker ? BLOCKER_LINE[ui.blocker]
+    : found ? null
+    : discovery.pull ? pullLine(discovery.pull)
+    : discovery.focused ? { title: `${discovery.focused.author_name}'s piece`.toUpperCase(), sub: 'TAP TO VIEW', icon: 'eye', onPress: () => setDetail(discovery.focused) }
+    : hinted && (painter?.strokes ?? 0) < 5 ? { title: 'SHAKE TO CHARGE', sub: settings.volumeButtons ? 'THEN HOLD A COLOUR OR VOL+ / VOL−' : 'THEN HOLD A COLOUR TO SPRAY' }
+    : null;
 
   return (
     <View style={styles.root}>
       <CameraView style={StyleSheet.absoluteFill} facing="back" animateShutter={false} mute />
       <PaintLayer yawSV={yawSV} pitchSV={pitchSV} rollSV={rollSV} walls={discovery.walls} />
       <Reticle spraying={ui.spraying} />
-      <PaintMeters />
-      <CanMeter />
-      <DiscoveryOverlay d={discovery} onReport={onReport} />
-      <BlockerBanner blocker={ui.blocker} />
-      <HoldButtons onStart={engine.start} onEnd={engine.end} />
-
-      <View style={styles.topBar} pointerEvents="box-none">
-        <Text style={styles.brand}>FRESCO</Text>
-        <Text style={styles.status}>{painter?.name ?? '—'} · {online ? 'live' : 'offline'} · {ui.yaw}°</Text>
-        <Pressable onPress={() => setTab('settings')} hitSlop={10} style={styles.gear}><Text style={styles.gearText}>⚙︎</Text></Pressable>
-      </View>
-      <View style={styles.hint} pointerEvents="none">
-        <Text style={styles.hintText}>{settings.volumeButtons ? 'hold the buttons or VOL+ / VOL− to spray · shake to charge' : 'hold the buttons to spray · shake to charge'}</Text>
-      </View>
-      <View style={styles.debug} pointerEvents="none">
-        <Text style={styles.debugText}>
-          vol events {debug.volEvents} (last {debug.lastVol}) · held {debug.held} · block {debug.blocker} · walls {debug.walls} · pose {debug.poseReady ? 'ok' : '…'} · gps {location ? `±${Math.round(location.accuracy)}m` : '…'} · surface {debug.surface}
-        </Text>
-      </View>
+      <DiscoveryCues d={discovery} />
+      <CreateHud
+        found={found}
+        onOpenFound={() => found && setDetail(found)}
+        notice={notice}
+        debug={settings.debugHud ? `vol events ${debug.volEvents} (last ${debug.lastVol}) · held ${debug.held} · block ${debug.blocker} · walls ${debug.walls} · pose ${debug.poseReady ? 'ok' : '…'} · gps ${location ? `±${Math.round(location.accuracy)}m` : '…'} · surface ${debug.surface}` : null}
+        onStart={engine.start}
+        onEnd={engine.end}
+      />
+      {detail && <PieceDetail canvas={detail} onClose={() => setDetail(null)} />}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0b0b0f', padding: 24 },
-  msg: { color: '#fff', fontSize: 16, textAlign: 'center', marginBottom: 16 },
-  btn: { backgroundColor: '#ff2d95', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24 },
-  btnText: { color: '#fff', fontWeight: '800' },
-  topBar: { position: 'absolute', top: 56, left: 16, right: 16, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  brand: { color: '#fff', fontWeight: '900', fontSize: 18, letterSpacing: 3 },
-  status: { color: '#ffffffaa', fontSize: 11, flex: 1 },
-  gear: { backgroundColor: '#0008', width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  gearText: { color: '#fff', fontSize: 18 },
-  debug: { position: 'absolute', top: 92, left: 12, right: 12, alignItems: 'center' },
-  debugText: { color: '#ffffff99', fontSize: 9, textAlign: 'center' },
-  hint: { position: 'absolute', bottom: 194, alignSelf: 'center', backgroundColor: '#0006', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 12 },
-  hintText: { color: '#ffffffcc', fontSize: 11 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#12082b', padding: 24, gap: 16 },
+  msg: { fontFamily: F.body, color: '#fff', fontSize: 16, textAlign: 'center' },
 });

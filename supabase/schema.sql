@@ -114,6 +114,7 @@ drop policy if exists "read canvases" on canvases;
 drop policy if exists "create canvas" on canvases;
 drop policy if exists "read strokes" on strokes;
 drop policy if exists "create stroke" on strokes;
+drop policy if exists "delete own stroke" on strokes;
 drop policy if exists "create report" on reports;
 
 create policy "read painters" on painters for select using (true);
@@ -122,6 +123,8 @@ create policy "read canvases" on canvases for select using (true);
 create policy "create canvas" on canvases for insert with check (auth.uid() = author_id);
 create policy "read strokes" on strokes for select using (true);
 create policy "create stroke" on strokes for insert with check (auth.uid() = author_id);
+-- Undo in the app deletes the stroke you just painted; only its author may.
+create policy "delete own stroke" on strokes for delete using (auth.uid() = author_id);
 create policy "create report" on reports for insert with check (auth.uid() = reporter_id);
 
 -- Triggers update counters on tables the caller can't update directly.
