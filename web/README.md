@@ -1,20 +1,19 @@
-> **This branch (`web-deploy`) is what Vercel builds.** It is `main` plus the `web/` directory
-> only — the QR entry flow, anonymous sign-in and the keys for the live Supabase project — so
-> native/Android work can never break the deployed site. Nothing else on this branch is current;
-> the phone app lives on `main` and `adarsh-samsung`.
+> **`main` is the web app, and what Vercel builds.** The QR entry flow, anonymous sign-in and the
+> keys for the live Supabase project live here. Native work happens on its own branches and is
+> merged in deliberately: `samsung-adarsh` (Android / ARCore) and `pixel-ui` (iPhone).
 >
 > A `vercel.json` at the repo root pins the build (`cd web && npm run build`, output `web/dist`,
 > framework detection off), so the site builds whether or not the Root Directory is set to `web`.
 > Without it, Vercel sees the Expo app at the root and publishes something that isn't a website —
 > the browser just downloads a file.
 >
-> Vercel settings: **Production Branch** `web-deploy`, **Root Directory** `web` (or leave it at the
-> repo root — the root `vercel.json` handles it). The Supabase keys
+> Vercel settings: **Production Branch** `main`, **Root Directory** `web` (or leave it at the repo
+> root — the root `vercel.json` handles it). The Supabase keys
 > are committed in `web/.env.production`, so no dashboard environment variables are needed — and
 > if any `VITE_SUPABASE_*` variables *are* set there they win over the committed file, so they
 > must hold the same values or be deleted.
 >
-> To pull in later web changes: `git checkout web-deploy && git checkout <branch> -- web/`.
+> To pull web changes made on another branch: `git checkout main && git checkout <branch> -- web/`.
 
 # Tagged — mobile web
 
