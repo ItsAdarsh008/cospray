@@ -4,6 +4,17 @@ Aim your phone like a spray can, **hold to spray** (on-screen buttons or the vol
 your paint stays on that spot for everyone who walks up to it later. Built for Hack the North
 (36h MVP), Expo SDK 57, iOS dev build. Bundle id / package names still say `tagged`.
 
+## Branches
+
+| Branch | What it's for |
+|---|---|
+| `main` | **The web app** — the QR painter in `web/`, and what Vercel deploys. The base every other branch starts from. |
+| `samsung-adarsh` | **Android** — the ARCore module in `modules/ar-paint/android` and the Android-side fixes. See `goal2.md`. |
+| `pixel-ui` | **iPhone** — the pixel-arcade UI on top of `main`. |
+
+Native branches merge `main` in; merging them *back* into `main` publishes native work to the
+deployed site's branch, so do it deliberately. Goals: `goal1.md` (web), `goal2.md` (Android).
+
 ## Three surfaces, one wall
 
 - **iPhone app** (this repo root): ARKit surface painting, glass dock shell, widget.
