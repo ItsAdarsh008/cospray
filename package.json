@@ -44,7 +44,9 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "supabase:check": "node scripts/use_supabase.mjs --check",
+    "supabase:use": "node scripts/use_supabase.mjs"
   },
   "private": true
 }

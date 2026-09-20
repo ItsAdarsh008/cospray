@@ -29,35 +29,69 @@ actually spraying — camera, compass and GPS need the real thing.
 
 ## What changed in the code
 
-- **`web/src/App.tsx`** — `signInAnonymously()` on load, so the first thing a scanner sees is the
+- **`web-app/src/App.tsx`** — `signInAnonymously()` on load, so the first thing a scanner sees is the
   name prompt. The email form is still there as a fallback if anonymous sign-in is ever off, and
   it now says why it appeared. The three-tab shell (PAINT / MAP / BOARD) is gone; the screen is
   the wall. The settings sheet stayed, because that's where the colours and caps live — removing
   it turned the paint screen's own settings button into a dead end, which I caught by clicking it.
-- **`web/src/data/sync.ts`** — `painters.name` is unique across the whole project, so the second
+- **`web-app/src/data/sync.ts`** — `painters.name` is unique across the whole project, so the second
   person to type ADARSH used to be bounced back to the keyboard. Now it tries ADARSH-2, ADARSH-3
   and so on before giving up. Somebody who just scanned a code should not have to negotiate for a
   name.
-- **`web/src/site/ScanToPaint.tsx`** — a "Scan to paint" panel on the landing page that renders a
+- **`web-app/src/site/ScanToPaint.tsx`** — a "Scan to paint" panel on the landing page that renders a
   QR of that site's own `/paint` URL in the browser, so it's right on localhost and right in
   production without anyone regenerating an image.
 - **Brand** — the web client still said TAGGED in three places; it says FRESCO now.
 
+## The Create screen, and paint that sits on a surface
+
+Two later passes, both on `main`:
+
+**The UI is the phone's Create screen now.** Same pixel-arcade furniture, rebuilt in CSS rather
+than React Native: Pixelify Sans / Silkscreen, hard-edged plates with notched corners and a slab
+shadow (`.px-box` mirrors `PixelBox`), a charge rail down the left edge that wobbles and says
+SHAKE when the can is low, status plates stacked in the middle, and two chunky hold-to-spray
+buttons carrying their colour swatch, colour name, paint left as a fill behind the label and a
+refill countdown — plus a tools button. The separate paint meters are gone; the level lives in the
+buttons, as on the phone.
+
+**Paint lands on a flat wall instead of sliding around you.** The old renderer blitted the wall
+raster with a 2D translate and rotate: it never foreshortened, so paint behaved like a sticker on
+a sphere — that's the "it doesn't target flat surfaces" feeling. Now a canvas is a genuine flat
+surface standing in front of the spot it was painted from:
+
+- the raster is the *texture of that plane* (a ray at (yaw, pitch) lands where it pierces the
+  plane, gnomonic), so a nozzle covers more wall the further along it you aim, exactly as it does
+  in life;
+- the renderer parks it in a 3D-transformed element and lets the browser do the perspective
+  divide. I checked the projection in a browser against `focal · tan(angle)` and it matches to the
+  pixel — the first attempt landed at *half* the angle, because CSS puts the eye `perspective` in
+  front of the z = 0 plane, so a wall at `translateZ(-R)` really sits at depth `perspective + R`.
+  The fix is to step out to the eye, rotate there, then go R along the rotated axis;
+- a wall is finite (±55° of yaw, ±40° of pitch, about as far along a wall as you can usefully
+  look). Aim past its edge and the can stops and the HUD says AIM AT THE WALL, which is the web's
+  version of the phone refusing to spray when the reticle isn't on a detected plane.
+
+**What this still isn't:** plane *detection*. A browser has no depth sensor and no position
+tracking, so the wall is where the canvas says it is, not where the real wall is, and walking
+around it doesn't parallax — turning your head does. Matching the phone properly would need
+WebXR hit-testing, which Android Chrome has and iOS Safari does not.
+
 ## What's left for you
 
 **`main` is the web app** — it carries the QR flow, anonymous sign-in and the live Supabase keys,
-and a root `vercel.json` that pins the build to `web/`. Native work sits on `samsung-adarsh`
+and a root `vercel.json` that pins the build to `web-app/`. Native work sits on `samsung-adarsh`
 (Android) and `pixel-ui` (iPhone) and is merged in deliberately.
 
 In the Vercel project:
 
 1. **Production Branch → `main`.** If it's already `main`, nothing to change — that's the point of
    the reshuffle.
-2. **Root Directory → `web`** (or leave it at the repo root; the root `vercel.json` covers that).
+2. **Root Directory → `web-app`** (or leave it at the repo root; the root `vercel.json` covers that).
    What must *not* happen is a deploy with no build step: served raw, `/` resolves to `index.ts`,
    the browser calls it `video/mp2t` and downloads it. That was the "download" file.
 3. **Environment variables:** none needed — the publishable key is committed in
-   `web/.env.production`. But if `VITE_SUPABASE_*` *are* set in the dashboard, Vite prioritises
+   `web-app/.env.production`. But if `VITE_SUPABASE_*` *are* set in the dashboard, Vite prioritises
    them over the committed file, so they must hold the new project's values or be deleted.
 4. **Redeploy** with the build cache off, then open the site on a laptop — the landing page carries
    the QR.
@@ -69,7 +103,7 @@ won't do.
 
 ```powershell
 git checkout main
-git checkout samsung-adarsh -- web/    # or whichever branch has the change
+git checkout samsung-adarsh -- web-app/   # or whichever branch has the change
 git commit -am "web: ..." && git push
 ```
 
@@ -121,7 +155,7 @@ at the bottom*, copy the **publishable** key (never `service_role` — it bypass
 node scripts/use_supabase.mjs https://<ref>.supabase.co <publishable key>
 ```
 
-That writes `.env`, `web/.env`, `web/.env.production` and `eas.json`, and re-runs the checks.
+That writes `.env`, `web-app/.env`, `web-app/.env.production` and `eas.json`, and re-runs the checks.
 
 ## What will bite
 

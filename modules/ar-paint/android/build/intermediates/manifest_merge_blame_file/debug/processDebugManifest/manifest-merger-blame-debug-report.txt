@@ -1,0 +1,34 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="expo.modules.arpaint" >
+4
+5    <uses-sdk android:minSdkVersion="24" />
+6
+7    <uses-permission android:name="android.permission.CAMERA" />
+7-->C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:2:3-63
+7-->C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:2:20-60
+8    <!-- AR optional: phones without ARCore still install and fall back to the compass painter -->
+9    <uses-feature
+9-->C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:4:3-86
+10        android:name="android.hardware.camera.ar"
+10-->C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:4:17-58
+11        android:required="false" />
+11-->C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:4:59-83
+12    <uses-feature
+12-->C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:5:3-76
+13        android:glEsVersion="0x00020000"
+13-->C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:5:17-49
+14        android:required="true" />
+14-->C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:5:50-73
+15
+16    <application>
+16-->C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:6:3-8:17
+17        <meta-data
+17-->C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:7:5-77
+18            android:name="com.google.ar.core"
+18-->C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:7:16-49
+19            android:value="optional" />
+19-->C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:7:50-74
+20    </application>
+21
+22</manifest>

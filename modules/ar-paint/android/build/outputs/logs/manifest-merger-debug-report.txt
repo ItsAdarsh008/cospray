@@ -1,0 +1,40 @@
+-- Merging decision tree log ---
+manifest
+ADDED from C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:1:1-9:12
+INJECTED from C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:1:1-9:12
+	package
+		INJECTED from C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml
+	xmlns:android
+		ADDED from C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:1:11-69
+uses-permission#android.permission.CAMERA
+ADDED from C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:2:3-63
+	android:name
+		ADDED from C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:2:20-60
+uses-feature#android.hardware.camera.ar
+ADDED from C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:4:3-86
+	android:required
+		ADDED from C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:4:59-83
+	android:name
+		ADDED from C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:4:17-58
+uses-feature#0x00020000
+ADDED from C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:5:3-76
+	android:glEsVersion
+		ADDED from C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:5:17-49
+	android:required
+		ADDED from C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:5:50-73
+application
+ADDED from C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:6:3-8:17
+meta-data#com.google.ar.core
+ADDED from C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:7:5-77
+	android:value
+		ADDED from C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:7:50-74
+	android:name
+		ADDED from C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml:7:16-49
+uses-sdk
+INJECTED from C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml
+INJECTED from C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from C:\Users\adars\Downloads\New folder (2)\htn26\modules\ar-paint\android\src\main\AndroidManifest.xml
