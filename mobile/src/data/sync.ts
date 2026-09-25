@@ -306,8 +306,8 @@ export async function fetchPreviewStrokes(ids: string[]) {
 function isLocalId(id: string | null) { return !id || id.startsWith('local-'); }
 
 // ---- AR world maps (Supabase Storage bucket "worldmaps") ---------------------------------
-// iPhone saves an ARWorldMap ("<canvas>.arworldmap"); Android saves its Cloud Anchor list
-// ("<canvas>.arcore.json"). Each platform can only relocalise against its own kind.
+// iPhone saves an ARWorldMap ("<uploader>/<canvas>.arworldmap"); Android saves its Cloud Anchor list
+// ("<uploader>/<canvas>.arcore.json"). Each platform can only relocalise against its own kind.
 
 /** This device can relocalise against the canvas's saved map. */
 export function worldMapUsable(c: Canvas) {
@@ -319,9 +319,12 @@ export async function uploadWorldMap(canvasId: string, localPath: string) {
   // first platform to save a map owns the canvas's map pointer: don't replace the other kind
   const existing = useStore.getState().canvases[canvasId];
   if (existing?.world_map_path && !worldMapUsable(existing)) return null;
+  // maps live in the uploader's own folder: storage policy + set_world_map() refuse anything else
+  const me = useStore.getState().painter?.id;
+  if (!me || isLocalId(me)) return null;
   try {
     const buf = await new File(localPath).arrayBuffer();
-    const objectPath = `${canvasId}${worldMapExtension}`;
+    const objectPath = `${me}/${canvasId}${worldMapExtension}`;
     const contentType = arPlatform === 'arcore' ? 'application/json' : 'application/octet-stream';
     const { error } = await supabase.storage.from('worldmaps').upload(objectPath, buf, { upsert: true, contentType });
     if (error) throw error;

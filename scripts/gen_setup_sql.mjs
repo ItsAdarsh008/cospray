@@ -12,6 +12,7 @@ const files = [
   ['migration_ar.sql', 'migration_ar.sql'],
   ['migration_upvotes.sql', 'migration_upvotes.sql'],
   ['migration_security.sql', 'migration_security.sql'],
+  ['migration_worldmaps_owned.sql', 'migration_worldmaps_owned.sql'],
   ['seed.sql', 'seed.sql (optional demo pieces)'],
 ].map(([name, title], i, all) => [name, `${i + 1}/${all.length}  ${title}`]);
 
@@ -26,6 +27,7 @@ const header = `-- ${'='.repeat(76)}
 --                          worldmaps bucket, set_world_map, the undo delete policy
 --   migration_upvotes.sql  upvotes table + toggle_upvote / top_pieces
 --   migration_security.sql report weighting, locked counters, view dedupe, limits
+--   migration_worldmaps_owned.sql  world maps writable only in the uploader's folder
 --   seed.sql               optional demo pieces around E7
 -- Edit those files, not this one: scripts/gen_setup_sql.mjs rebuilds it.
 -- ${'='.repeat(76)}
