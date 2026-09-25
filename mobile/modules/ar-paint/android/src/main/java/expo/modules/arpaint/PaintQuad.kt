@@ -66,6 +66,8 @@ class PaintQuad(val id: String, var transform: M4) {
   var cloudId: String? = null
   var hosting: HostCloudAnchorFuture? = null
   var lastSnap = 0L
+  /** When the (smoothed) plane first disagreed with this quad by more than the snap thresholds; 0 = agrees. */
+  var driftSince = 0L
   /** Placed from memory (no shared map): allow a wider snap radius onto real planes. */
   var loose = false
 

@@ -27,6 +27,8 @@ final class PaintNode {
   /// Identifier of the session ARAnchor currently carrying this quad (changes when we re-anchor).
   var anchorId: UUID?
   var lastSnap: CFTimeInterval = 0
+  /// When the plane first disagreed with this quad beyond the snap thresholds; 0 = agrees.
+  var driftSince: CFTimeInterval = 0
   /// Placed by the geo/heading fallback (no world map): allow a wider snap radius onto real planes.
   var loose = false
   var center: simd_float3 { simd_float3(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z) }
@@ -565,16 +567,23 @@ final class ArPaintView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   }
 
   /// Move a quad onto its plane (position projected along the normal, orientation = plane's).
-  /// Re-anchors the quad so ARKit keeps the corrected pose; debounced so refinement jitter is ignored.
+  /// Re-anchors the quad so ARKit keeps the corrected pose. Paint only moves when the plane has
+  /// disagreed with it by more than 2.5 cm / 3° for 1.5 s straight, and never under a stroke being
+  /// sprayed: following every refinement made big pieces visibly shake (same rule as Android).
   private func snap(_ node: PaintNode, to plane: ARPlaneAnchor, force: Bool = false) {
     let now = CACurrentMediaTime()
-    guard force || now - node.lastSnap > 0.7 else { return }
+    if !force, spraying, stroke?.nodeId == node.id { return }
     let pn = normal(of: plane.transform)
     let pc = planeCenterWorld(plane)
     let c = node.center
     let off = simd_dot(c - pc, pn)
     let angle = acos(max(-1, min(1, simd_dot(pn, node.normal))))
-    guard force || abs(off) > 0.012 || angle > 2 * .pi / 180 else { return }
+    if !force {
+      guard abs(off) > 0.025 || angle > 3 * .pi / 180 else { node.driftSince = 0; return }
+      if node.driftSince == 0 { node.driftSince = now; return }
+      guard now - node.driftSince >= 1.5 else { return }
+    }
+    node.driftSince = 0
     let target = quadFrame(position: c - pn * off, normal: pn, plane: plane)
     node.lastSnap = now
     node.transform = target

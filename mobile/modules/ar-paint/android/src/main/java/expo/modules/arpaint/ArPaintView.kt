@@ -161,6 +161,19 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
     const val POSE_JUMP_M = 0.35f
     /** Ease time constant, seconds: a real refinement lands in about a fifth of a second. */
     const val POSE_EASE_TAU = 0.07f
+
+    // ---- keeping painted surfaces still (see PlaneEst / snap) ----
+    /**
+     * ARCore re-estimates a plane every frame, and on a phone without a depth sensor a wall's normal
+     * wanders by a degree or more frame to frame. Paint must not follow that: a 1 degree wobble moves
+     * the far end of a 3 m tag by 5 cm. Planes are smoothed over this time constant (seconds)...
+     */
+    const val PLANE_TAU_S = 1.2f
+    /** ...and paint only moves when the smoothed plane disagrees with it by more than this... */
+    const val SNAP_OFFSET_M = 0.025f
+    const val SNAP_ANGLE_DEG = 3f
+    /** ...continuously for this long, so a burst of bad estimates never moves anything. */
+    const val SNAP_PERSIST_MS = 1500L
   }
 
   private val onTracking by EventDispatcher()
@@ -222,6 +235,10 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
 
   private val quads = LinkedHashMap<String, PaintQuad>()
   private val planes = LinkedHashMap<Plane, Long>() // plane → first seen (fade-in)
+
+  /** A plane's equation n·x = d, low-pass filtered: what paint is held to instead of the raw estimate. */
+  private class PlaneEst(var n: V3, var d: Float, var at: Long)
+  private val planeEst = HashMap<Plane, PlaneEst>()
   private var aimedPlane: Plane? = null
   private var cameraPos = V3.ZERO
   private var tracking = false
@@ -701,6 +718,7 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
   private fun updatePlanes(frame: Frame, now: Long) {
     for (p in frame.getUpdatedTrackables(Plane::class.java)) {
       if (p.subsumedBy != null || p.trackingState == TrackingState.STOPPED) {
+        planeEst.remove(p)
         // merged into another plane: quads go back to "unbound" and re-adopt the survivor
         if (planes.remove(p) != null) {
           if (aimedPlane == p) aimedPlane = null
@@ -716,6 +734,7 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
       }
       val isNew = !planes.containsKey(p)
       if (isNew) planes[p] = now
+      smoothPlane(p, now)
       // ARCore refines a plane's depth/tilt for a while after it appears: keep our quads on it
       for (q in quads.values) {
         if (!q.placed) continue
@@ -762,13 +781,18 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
     }
   }
 
-  /** (Re)anchor a quad at its current transform, on its plane when it has one. */
+  /**
+   * (Re)anchor a quad at its current transform, with a world anchor. It used to be a plane anchor,
+   * which ARCore moves with every re-estimate of the plane: that is the frame-to-frame shake a big
+   * tag showed. A world anchor only moves when ARCore corrects its map of the room; slower,
+   * deliberate plane corrections are applied by [snap].
+   */
   private fun anchorQuad(q: PaintQuad) {
     val s = session ?: return
     val pose = M.toPose(q.transform)
     val old = q.anchor
     q.anchor = try {
-      q.plane?.takeIf { it.trackingState == TrackingState.TRACKING }?.createAnchor(pose) ?: s.createAnchor(pose)
+      s.createAnchor(pose)
     } catch (e: Exception) {
       Log.w(TAG, "createAnchor failed", e); null
     }
@@ -828,18 +852,41 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
     snap(q, plane, now, force = true)
   }
 
-  /** Move a quad onto its plane (position projected along the normal, orientation from the plane's normal). Debounced. */
+  /** Fold this frame's estimate of [p] into its smoothed equation (exponential, frame-rate independent). */
+  private fun smoothPlane(p: Plane, now: Long) {
+    val n = planeNormal(p)
+    val d = n dot planeCenter(p)
+    val e = planeEst[p]
+    if (e == null) { planeEst[p] = PlaneEst(n, d, now); return }
+    val dt = (now - e.at).coerceIn(0, 500) / 1000f
+    e.at = now
+    val k = 1f - kotlin.math.exp(-dt / PLANE_TAU_S)
+    e.n = (e.n + (n - e.n) * k).normalized()
+    e.d += (d - e.d) * k
+  }
+
+  /**
+   * Move a quad onto its plane (position projected along the normal, orientation from the normal),
+   * using the smoothed plane, and only once it has disagreed by more than SNAP_OFFSET_M /
+   * SNAP_ANGLE_DEG for SNAP_PERSIST_MS. [force] (binding to a plane for the first time) moves it now.
+   */
   private fun snap(q: PaintQuad, plane: Plane, now: Long, force: Boolean = false) {
     // ARCore grows a plane as it sees more of it, and a wall's first patch looks like a tabletop,
     // so the furniture verdict is re-taken every time rather than latched at first contact.
     q.onFurniture = isFurniture(plane)
-    if (!force && now - q.lastSnap < 700) return
-    val pn = planeNormal(plane)
-    val pc = planeCenter(plane)
+    // never move the surface under a stroke that is being sprayed
+    if (!force && spraying && stroke?.quadId == q.id) return
+    val est = planeEst[plane]
+    val pn = est?.n ?: planeNormal(plane)
     val c = q.center
-    val off = (c - pc) dot pn
+    val off = (pn dot c) - (est?.d ?: (pn dot planeCenter(plane)))
     val angle = acos((pn dot q.normal).coerceIn(-1f, 1f))
-    if (!force && abs(off) <= 0.012f && angle <= Math.toRadians(2.0).toFloat()) return
+    if (!force) {
+      if (abs(off) <= SNAP_OFFSET_M && angle <= Math.toRadians(SNAP_ANGLE_DEG.toDouble()).toFloat()) { q.driftSince = 0; return }
+      if (q.driftSince == 0L) { q.driftSince = now; return }
+      if (now - q.driftSince < SNAP_PERSIST_MS) return
+    }
+    q.driftSince = 0
     q.lastSnap = now
     // Re-project the quad's OWN in-plane axis rather than rebuilding the frame from scratch.
     // quadFrame derives a horizontal surface's X from heading.east(), and the heading is
