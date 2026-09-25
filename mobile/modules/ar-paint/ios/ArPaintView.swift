@@ -187,11 +187,7 @@ final class ArPaintView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   var radius: CGFloat = 0.05
   var flow: CGFloat = 1
   var showPlanes = true { didSet { planeNodes.values.forEach { $0.isHidden = !showPlanes } } }
-  /// People occlusion: paint is hidden behind anyone standing in front of it. Changing it re-runs
-  /// the session with the new configuration (no reset, so anchors and paint stay put).
-  var occlusion = true {
-    didSet { if occlusion != oldValue && started && window != nil { sceneView.session.run(makeConfig(worldMap: nil)) } }
-  }
+
 
   private var paintNodes: [String: PaintNode] = [:]
   private var planeNodes: [UUID: SCNNode] = [:]
@@ -272,7 +268,7 @@ final class ArPaintView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     if hasLidar { config.sceneReconstruction = .mesh }
     // People occlusion (A12 and later): ARKit writes people's depth into the frame and ARSCNView
     // uses it, so paint (which reads the depth buffer) disappears behind whoever walks in front.
-    if occlusion, ARWorldTrackingConfiguration.supportsFrameSemantics(.personSegmentationWithDepth) {
+    if ARWorldTrackingConfiguration.supportsFrameSemantics(.personSegmentationWithDepth) {
       config.frameSemantics.insert(.personSegmentationWithDepth)
     }
     if let map = worldMap { config.initialWorldMap = map }

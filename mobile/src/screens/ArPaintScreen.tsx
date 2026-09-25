@@ -294,7 +294,6 @@ export function ArPaintScreen({ active = true }: { active?: boolean }) {
         radius={engine.native.radius}
         flow={engine.native.flow}
         showPlanes={settings.showPlanes}
-        occlusion={settings.occlusion}
         worldMapPath={worldMapPath}
         onTracking={onTracking}
         onHit={onHit}

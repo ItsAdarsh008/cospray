@@ -71,7 +71,8 @@ import kotlin.math.min
  *
  * OCCLUSION: with the Depth API on, the paint shader compares each fragment's distance against
  * ARCore's depth map and fades out wherever something real is clearly in front of it: a person
- * walking past, a pole, the near edge of a pillar. See [DepthTexture]. Settings can turn it off.
+ * walking past, a pole, the near edge of a pillar. See [DepthTexture]. Always on: real paint
+ * behind something is not visible, so neither is this.
  *
  * MOVED SURFACES: ARCore assumes nothing in the world moves, so paint on a chair that gets pushed
  * away is left hanging in the air. [verifySurfaces] samples the depth map where each piece on a
@@ -177,8 +178,6 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
   @Volatile var radius = 0.05f
   @Volatile var flow = 1f
   @Volatile var showPlanes = true
-  /** Hide paint behind real things in front of it, using the depth map. */
-  @Volatile var occlusion = true
   @Volatile private var colorInt = Color.rgb(255, 46, 148)
   @Volatile private var colorHex = "#ff2e94"
 
@@ -641,7 +640,7 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
     }
 
     for (q in quads.values) q.upload(now)
-    if (depthEnabled && occlusion) depthTexture.update(frame, now)
+    if (depthEnabled) depthTexture.update(frame, now)
     val job = snapshotJob
     if (job != null) snapshotJob = null
     drawScene(hit, now, overlays = job == null)
@@ -676,7 +675,7 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
         planeRenderer.draw(viewProj, M.fromPose(p.centerPose), p.polygon, p.type == Plane.Type.VERTICAL, opacity)
       }
     }
-    quadRenderer.beginPaint(if (depthEnabled && occlusion) depthTexture else null, viewportW, viewportH)
+    quadRenderer.beginPaint(if (depthEnabled) depthTexture else null, viewportW, viewportH)
     // q.missing: the surface this was painted on has been carried off, so the paint goes with it
     for (q in quads.values) if (q.placed && !q.missing) quadRenderer.drawPaint(viewProj, viewM, q)
     if (hit != null && overlays) {

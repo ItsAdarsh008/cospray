@@ -58,7 +58,6 @@ public class ArPaintModule: Module {
       Prop("radius") { (view: ArPaintView, value: Double) in view.radius = CGFloat(value) }
       Prop("flow") { (view: ArPaintView, value: Double) in view.flow = CGFloat(value) }
       Prop("showPlanes") { (view: ArPaintView, value: Bool) in view.showPlanes = value }
-      Prop("occlusion") { (view: ArPaintView, value: Bool) in view.occlusion = value }
       Prop("worldMapPath") { (view: ArPaintView, value: String?) in view.setWorldMapPath(value) }
 
       AsyncFunction("saveWorldMap") { (view: ArPaintView, path: String, promise: Promise) in
