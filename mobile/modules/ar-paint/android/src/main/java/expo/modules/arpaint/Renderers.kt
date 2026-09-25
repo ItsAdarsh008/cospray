@@ -13,7 +13,8 @@ import java.nio.FloatBuffer
 /**
  * Small GLES 2 renderers for the AR view: camera background, plane grids, paint quads, reticle.
  * No depth buffer use: like the iPhone's SceneKit materials, nothing writes depth, and layers
- * draw in a fixed order (planes → paint → reticle).
+ * draw in a fixed order (planes → paint → reticle). Occlusion comes from ARCore's depth map instead
+ * (see [DepthTexture]): paint fades out wherever the real world is measurably in front of it.
  */
 internal object Gl {
   private const val TAG = "ArPaint"
@@ -170,11 +171,80 @@ internal class PlaneRenderer {
   }
 }
 
+/**
+ * ARCore's depth map as a GL texture, for occluding paint behind real things (people, cars, a pillar
+ * between you and the wall). DEPTH16 is millimetres; it is uploaded as LUMINANCE_ALPHA so the low
+ * byte lands in .r and the high byte in .a (GLES 2 has no 16-bit integer textures), NEAREST so the
+ * two bytes are never interpolated separately. [uvO]/[uvX]/[uvY] map view-normalised coordinates
+ * (0..1, y down) to depth-texture coordinates, affinely, which covers every display rotation.
+ */
+internal class DepthTexture {
+  var textureId = 0; private set
+  /** True while the last upload is fresh enough to occlude with. */
+  var ready = false; private set
+  val uvO = FloatArray(2)
+  val uvX = FloatArray(2)
+  val uvY = FloatArray(2)
+  private var lastUpload = 0L
+  private var tight: ByteBuffer? = null
+  private val corners = floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f)
+  private val mapped = FloatArray(6)
+
+  fun create() {
+    val ids = IntArray(1)
+    GLES20.glGenTextures(1, ids, 0)
+    textureId = ids[0]
+    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
+    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_NEAREST)
+    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_NEAREST)
+    ready = false
+  }
+
+  /** Upload this frame's depth if ARCore has one; keep the last one for up to 300 ms if not. */
+  fun update(frame: Frame, now: Long) {
+    try {
+      frame.acquireDepthImage16Bits().use { img ->
+        val plane = img.planes[0]
+        val w = img.width
+        val h = img.height
+        val row = w * 2
+        val src = plane.buffer
+        val data = if (plane.rowStride == row) src else {
+          val buf = tight?.takeIf { it.capacity() >= row * h } ?: ByteBuffer.allocateDirect(row * h).also { tight = it }
+          buf.clear()
+          for (y in 0 until h) {
+            src.limit(y * plane.rowStride + row); src.position(y * plane.rowStride)
+            buf.put(src)
+          }
+          buf.flip(); buf
+        }
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
+        GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 1)
+        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_LUMINANCE_ALPHA, w, h, 0, GLES20.GL_LUMINANCE_ALPHA, GLES20.GL_UNSIGNED_BYTE, data)
+        GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 4)
+        frame.transformCoordinates2d(Coordinates2d.VIEW_NORMALIZED, corners, Coordinates2d.TEXTURE_NORMALIZED, mapped)
+        uvO[0] = mapped[0]; uvO[1] = mapped[1]
+        uvX[0] = mapped[2] - mapped[0]; uvX[1] = mapped[3] - mapped[1]
+        uvY[0] = mapped[4] - mapped[0]; uvY[1] = mapped[5] - mapped[1]
+        lastUpload = now
+      }
+    } catch (_: Exception) {
+      // NotYetAvailableException for the first frames, and now and then after; not an error
+    }
+    ready = lastUpload > 0 && now - lastUpload < 300
+  }
+}
+
 /** Paint quads (5 m, textured from their bitmap) and the reticle ring, both lying in their frame's XZ plane. */
 internal class QuadRenderer {
   private var paintProgram = 0
   private var reticleProgram = 0
   private var pPos = 0; private var pTex = 0; private var pMvp = 0; private var pSampler = 0
+  private var pModelView = 0; private var pDepth = 0; private var pUseDepth = 0; private var pViewport = 0
+  private var pUvO = 0; private var pUvX = 0; private var pUvY = 0
+  private val modelView = FloatArray(16)
   private var rPos = 0; private var rMvp = 0; private var rColor = 0
   private val mvp = FloatArray(16)
 
@@ -191,20 +261,59 @@ internal class QuadRenderer {
       attribute vec3 a_Pos;
       attribute vec2 a_Tex;
       uniform mat4 u_Mvp;
+      uniform mat4 u_ModelView;
       varying vec2 v_Tex;
-      void main() { v_Tex = a_Tex; gl_Position = u_Mvp * vec4(a_Pos, 1.0); }
+      varying float v_Depth; // metres along the camera axis, like ARCore's depth map
+      void main() {
+        v_Tex = a_Tex;
+        v_Depth = -(u_ModelView * vec4(a_Pos, 1.0)).z;
+        gl_Position = u_Mvp * vec4(a_Pos, 1.0);
+      }
       """.trimIndent(),
       """
+      #ifdef GL_FRAGMENT_PRECISION_HIGH
+      precision highp float; // depth in mm reaches 65535: past mediump's guaranteed range
+      #else
       precision mediump float;
+      #endif
       varying vec2 v_Tex;
+      varying float v_Depth;
       uniform sampler2D u_Tex;
-      void main() { gl_FragColor = texture2D(u_Tex, v_Tex); } // bitmap is premultiplied
+      uniform sampler2D u_Depth;
+      uniform float u_UseDepth;
+      uniform vec2 u_Viewport;
+      uniform vec2 u_UvO;
+      uniform vec2 u_UvX;
+      uniform vec2 u_UvY;
+      void main() {
+        vec4 c = texture2D(u_Tex, v_Tex); // bitmap is premultiplied
+        if (u_UseDepth > 0.5 && c.a > 0.0) {
+          vec2 vn = vec2(gl_FragCoord.x / u_Viewport.x, 1.0 - gl_FragCoord.y / u_Viewport.y);
+          vec4 t = texture2D(u_Depth, u_UvO + vn.x * u_UvX + vn.y * u_UvY);
+          float scene = (t.r * 255.0 + t.a * 255.0 * 256.0) / 1000.0;
+          if (scene > 0.0) {
+            // Depth-from-motion is noisy, and worse with range: the wall the paint is on must never
+            // hide it. Only something clearly in front (a margin that grows with distance) does,
+            // and it feathers over 10 cm so the edge of a passer-by doesn't flicker.
+            float margin = 0.12 + 0.06 * v_Depth;
+            c *= smoothstep(v_Depth - margin - 0.1, v_Depth - margin, scene);
+          }
+        }
+        gl_FragColor = c;
+      }
       """.trimIndent(),
     )
     pPos = GLES20.glGetAttribLocation(paintProgram, "a_Pos")
     pTex = GLES20.glGetAttribLocation(paintProgram, "a_Tex")
     pMvp = GLES20.glGetUniformLocation(paintProgram, "u_Mvp")
     pSampler = GLES20.glGetUniformLocation(paintProgram, "u_Tex")
+    pModelView = GLES20.glGetUniformLocation(paintProgram, "u_ModelView")
+    pDepth = GLES20.glGetUniformLocation(paintProgram, "u_Depth")
+    pUseDepth = GLES20.glGetUniformLocation(paintProgram, "u_UseDepth")
+    pViewport = GLES20.glGetUniformLocation(paintProgram, "u_Viewport")
+    pUvO = GLES20.glGetUniformLocation(paintProgram, "u_UvO")
+    pUvX = GLES20.glGetUniformLocation(paintProgram, "u_UvX")
+    pUvY = GLES20.glGetUniformLocation(paintProgram, "u_UvY")
 
     reticleProgram = Gl.program(
       """
@@ -250,19 +359,33 @@ internal class QuadRenderer {
     rColor = GLES20.glGetUniformLocation(reticleProgram, "u_Color")
   }
 
-  fun beginPaint() {
+  /** [depth]: occlude against it (null = draw paint over everything, as before). */
+  fun beginPaint(depth: DepthTexture?, viewportW: Int, viewportH: Int) {
     GLES20.glEnable(GLES20.GL_BLEND)
     GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
     GLES20.glDisable(GLES20.GL_CULL_FACE)
     GLES20.glUseProgram(paintProgram)
-    GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+    val occlude = depth != null && depth.ready && viewportW > 0 && viewportH > 0
+    GLES20.glUniform1f(pUseDepth, if (occlude) 1f else 0f)
+    if (occlude) {
+      GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
+      GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, depth!!.textureId)
+      GLES20.glUniform1i(pDepth, 1)
+      GLES20.glUniform2f(pViewport, viewportW.toFloat(), viewportH.toFloat())
+      GLES20.glUniform2f(pUvO, depth.uvO[0], depth.uvO[1])
+      GLES20.glUniform2f(pUvX, depth.uvX[0], depth.uvX[1])
+      GLES20.glUniform2f(pUvY, depth.uvY[0], depth.uvY[1])
+    }
+    GLES20.glActiveTexture(GLES20.GL_TEXTURE0) // per-quad paint textures bind to unit 0
     GLES20.glUniform1i(pSampler, 0)
   }
 
-  fun drawPaint(viewProj: FloatArray, quad: PaintQuad) {
+  fun drawPaint(viewProj: FloatArray, view: FloatArray, quad: PaintQuad) {
     if (quad.texture == 0) return
     Matrix.multiplyMM(mvp, 0, viewProj, 0, quad.transform, 0)
     GLES20.glUniformMatrix4fv(pMvp, 1, false, mvp, 0)
+    Matrix.multiplyMM(modelView, 0, view, 0, quad.transform, 0)
+    GLES20.glUniformMatrix4fv(pModelView, 1, false, modelView, 0)
     GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, quad.texture)
     quadPos.position(0); quadTex.position(0)
     GLES20.glVertexAttribPointer(pPos, 3, GLES20.GL_FLOAT, false, 0, quadPos)

@@ -41,6 +41,7 @@ class ArPaintModule : Module() {
       Prop("radius") { view: ArPaintView, value: Double -> view.radius = value.toFloat() }
       Prop("flow") { view: ArPaintView, value: Double -> view.flow = value.toFloat() }
       Prop("showPlanes") { view: ArPaintView, value: Boolean -> view.showPlanes = value }
+      Prop("occlusion") { view: ArPaintView, value: Boolean -> view.occlusion = value }
       Prop("worldMapPath") { view: ArPaintView, value: String? -> view.setWorldMapPath(value) }
 
       AsyncFunction("saveWorldMap") { view: ArPaintView, path: String, promise: Promise -> view.saveWorldMap(path, promise) }

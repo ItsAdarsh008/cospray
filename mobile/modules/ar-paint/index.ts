@@ -47,6 +47,8 @@ export type ArPaintViewProps = ViewProps & {
   radius?: number; // metres
   flow?: number; // 0..1
   showPlanes?: boolean;
+  /** Hide paint behind real things in front of it: people on iPhone (A12+), anything the depth map sees on Android. Default on. */
+  occlusion?: boolean;
   worldMapPath?: string | null;
   onTracking?: (e: { nativeEvent: ArTrackingEvent }) => void;
   onHit?: (e: { nativeEvent: ArHitEvent }) => void;

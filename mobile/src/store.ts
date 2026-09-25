@@ -21,6 +21,7 @@ export type Settings = {
   haptics: boolean;
   sound: boolean;
   showPlanes: boolean; // AR: draw the guide grid over detected surfaces
+  occlusion: boolean; // AR: hide paint behind people / things in front of it
   settingsVersion: number; // bumped when a default changes and stored settings must follow
   // ---- local-only (no backend): crew pick, market wallet + unlocks, Create tools
   crew: string | null;
@@ -91,6 +92,7 @@ const DEFAULT_SETTINGS: Settings = {
   haptics: true,
   sound: true,
   showPlanes: false, // the guide grid is a tool, not the look — off unless asked for
+  occlusion: true,
   settingsVersion: 1,
   crew: null,
   owned: [],

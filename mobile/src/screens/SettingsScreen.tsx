@@ -26,6 +26,7 @@ export function SettingsScreen() {
         <Row label="Haptics" value={settings.haptics} onChange={(v) => setSettings({ haptics: v })} />
         <Row label="Sound" value={settings.sound} onChange={(v) => setSettings({ sound: v })} />
         <Row label="Surface guide grid" sub="green and blue lines over the floors and walls AR has found" value={settings.showPlanes} onChange={(v) => setSettings({ showPlanes: v })} />
+        <Row label="Hide paint behind people and objects" sub="uses the depth camera / depth estimate" value={settings.occlusion} onChange={(v) => setSettings({ occlusion: v })} />
         <Row label="Debug line in Create" sub="tracking, planes, GPS accuracy" value={settings.debugHud} onChange={(v) => setSettings({ debugHud: v })} />
         {/* dev builds only: a release build can't switch the geofence off */}
         {__DEV__ && <Row label="Paint anywhere" sub="bypass the Waterloo Region geofence (dev build)" value={settings.geofenceBypass} onChange={(v) => setSettings({ geofenceBypass: v })} />}

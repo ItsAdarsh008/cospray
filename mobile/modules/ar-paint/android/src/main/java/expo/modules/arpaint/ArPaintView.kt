@@ -69,6 +69,10 @@ import kotlin.math.min
  * ANCHORING: every quad rides an ARCore anchor (attached to its plane when it has one), is snapped
  * onto a real plane when one appears (< 15 cm, < 14°) and re-snapped as ARCore refines it.
  *
+ * OCCLUSION: with the Depth API on, the paint shader compares each fragment's distance against
+ * ARCore's depth map and fades out wherever something real is clearly in front of it: a person
+ * walking past, a pole, the near edge of a pillar. See [DepthTexture]. Settings can turn it off.
+ *
  * MOVED SURFACES: ARCore assumes nothing in the world moves, so paint on a chair that gets pushed
  * away is left hanging in the air. [verifySurfaces] samples the depth map where each piece on a
  * piece of furniture sits — see [isFurniture], which means raised, upward-facing and small enough
@@ -173,6 +177,8 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
   @Volatile var radius = 0.05f
   @Volatile var flow = 1f
   @Volatile var showPlanes = true
+  /** Hide paint behind real things in front of it, using the depth map. */
+  @Volatile var occlusion = true
   @Volatile private var colorInt = Color.rgb(255, 46, 148)
   @Volatile private var colorHex = "#ff2e94"
 
@@ -206,6 +212,7 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
   private val background = CameraBackground()
   private val planeRenderer = PlaneRenderer()
   private val quadRenderer = QuadRenderer()
+  private val depthTexture = DepthTexture()
   private var viewportW = 0
   private var viewportH = 0
   private var displayChanged = true
@@ -575,6 +582,7 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
     background.create()
     planeRenderer.create()
     quadRenderer.create()
+    depthTexture.create()
     cameraTextureSet = false
     for (q in quads.values) q.onContextLost()
   }
@@ -633,6 +641,7 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
     }
 
     for (q in quads.values) q.upload(now)
+    if (depthEnabled && occlusion) depthTexture.update(frame, now)
     val job = snapshotJob
     if (job != null) snapshotJob = null
     drawScene(hit, now, overlays = job == null)
@@ -667,9 +676,9 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
         planeRenderer.draw(viewProj, M.fromPose(p.centerPose), p.polygon, p.type == Plane.Type.VERTICAL, opacity)
       }
     }
-    quadRenderer.beginPaint()
+    quadRenderer.beginPaint(if (depthEnabled && occlusion) depthTexture else null, viewportW, viewportH)
     // q.missing: the surface this was painted on has been carried off, so the paint goes with it
-    for (q in quads.values) if (q.placed && !q.missing) quadRenderer.drawPaint(viewProj, q)
+    for (q in quads.values) if (q.placed && !q.missing) quadRenderer.drawPaint(viewProj, viewM, q)
     if (hit != null && overlays) {
       val t = hit.transform
       val n = M.col(t, 1).normalized()
