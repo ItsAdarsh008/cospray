@@ -91,21 +91,44 @@ async function cacheCanvas(c: Canvas) {
   } catch {}
 }
 
+/**
+ * The `updated_at` each canvas had when we last fetched its strokes. This refresh runs every 15 s
+ * and used to download every stroke of every canvas within 600 m each time — the neighbourhood's
+ * whole history, again and again. The stroke trigger bumps `canvases.updated_at`, so now a wall is
+ * fetched once, and afterwards only when it has changed, and then only the strokes newer than that.
+ */
+const synced: Record<string, string> = {};
+/** Re-ask for a minute before the cursor: created_at is the inserting transaction's start time, so a
+ *  slow insert can commit a row dated just before one we already have. Duplicates are dropped by id. */
+const CURSOR_OVERLAP_MS = 60_000;
+
+async function fetchStrokes(ids: string[], since?: string): Promise<Stroke[]> {
+  let q = supabase.from('strokes').select('*').in('canvas_id', ids);
+  if (since) q = q.gt('created_at', new Date(Date.parse(since) - CURSOR_OVERLAP_MS).toISOString());
+  const { data, error } = await q.order('created_at');
+  if (error) throw error;
+  return data as Stroke[];
+}
+
 export async function loadNearby(lat: number, lng: number) {
   if (!hasBackend) return;
   try {
-    const { data: canvases, error } = await supabase.rpc('nearby_canvases', { qlat: lat, qlng: lng, radius_m: NEARBY_FETCH_RADIUS_M });
+    const { data, error } = await supabase.rpc('nearby_canvases', { qlat: lat, qlng: lng, radius_m: NEARBY_FETCH_RADIUS_M });
     if (error) throw error;
+    const canvases = data as Canvas[];
     const st = useStore.getState();
     st.setOnline(true);
-    st.setCanvases(canvases as Canvas[]);
-    const ids = (canvases as Canvas[]).map((c) => c.id);
-    if (ids.length) {
-      const { data: strokes, error: e2 } = await supabase.from('strokes').select('*').in('canvas_id', ids).order('created_at');
-      if (e2) throw e2;
-      for (const s of strokes as Stroke[]) applyStroke(s);
-    }
-    for (const c of canvases as Canvas[]) cacheCanvas(c);
+    st.setCanvases(canvases);
+    const stale = canvases.filter((c) => synced[c.id] !== c.updated_at);
+    const fresh = stale.filter((c) => !synced[c.id]).map((c) => c.id);
+    const changed = stale.filter((c) => synced[c.id]);
+    const since = changed.map((c) => synced[c.id]).sort()[0]; // the oldest cursor covers them all
+    const strokes = [
+      ...(fresh.length ? await fetchStrokes(fresh) : []),
+      ...(changed.length ? await fetchStrokes(changed.map((c) => c.id), since) : []),
+    ];
+    for (const s of strokes) applyStroke(s);
+    for (const c of stale) { synced[c.id] = c.updated_at; cacheCanvas(c); }
   } catch (e) {
     console.warn('loadNearby failed', e);
     useStore.getState().setOnline(false);
