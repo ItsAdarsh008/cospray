@@ -21,6 +21,9 @@ you rely on them.
 | `ar(android): keyless ARCore auth` (+ boolean fix) | §1a: Cloud Anchors last 365 days instead of 1, no key in the APK |
 | `ar: record each stroke's pose on Earth (Geospatial)` | §1a: Android records a WGS84 pose per stroke and moves placed-from-memory pieces onto it once its own VPS fix is good |
 | `ar: hide paint behind people and objects` | §1b(i): Android depth-map occlusion in the paint shader; iPhone people occlusion |
+| `ar: occlusion is always on` | No toggle: paint behind something is never visible |
+| `ar: keep painted surfaces still` | Fixes paint shaking with ARCore's jittery planes: world anchors, smoothed planes, re-snap only on persistent 2.5 cm / 3° drift, never mid-stroke (iPhone gets the same rule) |
+| `ar(android): hide paint behind hands and people using segmentation` | Depth-from-motion misses a moving hand, so ML Kit selfie segmentation now masks people/hands too |
 
 ### Before this runs anywhere: deploy steps
 
@@ -41,6 +44,9 @@ you rely on them.
 - TypeScript passes in `mobile/` and `web/`. The ARCore module's Kotlin compiles. A full Android
   debug build (arm64) succeeds and installs on the Galaxy S25, and the app launches with no JS
   errors.
+- On-device test (S25, first build): the app ran, but a hand passed in front of paint didn't hide
+  it, and big tags shook with ARCore's plane jitter. Both are addressed by the last three commits,
+  which are **built but not yet installed** (the phone was unauthorised for USB debugging).
 - The stroke codec round-trips real-shaped data (a 1300-dab AR sweep and compass strokes with
   drips, including truncated/invalid input).
 - **Windows build gotcha:** from `C:\Users\…\GitHub\cospray\cospray\mobile`, reanimated's CMake
@@ -51,12 +57,13 @@ you rely on them.
 
 - **Nothing here has run against a live database.** The SQL was written against the existing schema
   but hasn't been executed. Watch for errors the first time you run it.
-- **iOS changes weren't compiled** (there's no Mac on this machine): the `occlusion` prop and people
-  occlusion in `ArPaintView.swift` / `ArPaintModule.swift`. They're small, but build on a Mac
-  before trusting them.
-- **The Android shader compiles at runtime.** If occlusion is broken, paint will fail to draw, and
-  logcat will show `ArPaint: compile failed`. Settings → "Hide paint behind people and objects"
-  turns off the depth path, but the shader itself changed either way.
+- **iOS changes weren't compiled** (there's no Mac on this machine): people occlusion and the
+  snap hysteresis in `ArPaintView.swift`. They're small, but build on a Mac before trusting them.
+- **The Android shader compiles at runtime.** If paint stops drawing entirely, logcat will show
+  `ArPaint: compile failed`.
+- **Whether ML Kit's selfie model catches a hand on its own** (it's trained on people). The debug
+  line's `occl … ppl N%` tells you: if it stays at 0% with a hand in view, swap in a hand-landmark
+  or multiclass segmentation model.
 - **Geospatial hasn't been tried outdoors with auth.** It needs keyless auth (or a key) plus Street
   View coverage.
 
@@ -89,7 +96,8 @@ you rely on them.
    - A pool of world maps per wall instead of last-painter-wins, and wall pose refinement from
      visitors.
    - Paint-free reference keyframes + a "line it up" ghost for indoor relocalisation.
-7. **Occlusion, the rest of §1b:** LiDAR-mesh occlusion of non-people on iPhone Pro; persistent
+7. **Occlusion, the rest of §1b:** LiDAR-mesh occlusion of non-people on iPhone Pro (non-Pro
+   iPhones have no scene depth at all, so people are the most ARKit can occlude there); persistent
    "this wall got covered" detection (per-visit depth + appearance votes aggregated server-side,
    fade to ghost + notify the author). Android's moved-furniture check is the seed of it.
 8. **Growth, monetisation, observability (§4, §6, §8):** unchanged. Sentry + PostHog before
