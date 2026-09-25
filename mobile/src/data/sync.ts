@@ -177,6 +177,8 @@ export async function uploadStroke(s: Stroke, retry = true): Promise<void> {
     id: s.id, canvas_id: s.canvas_id, author_id: isLocalId(s.author_id) ? null : s.author_id,
     author_name: s.author_name, color: s.color, cap: s.cap, ...wirePoints(s.points), paint_used: s.paint_used,
     anchor_id: s.anchor_id ?? null, transform: s.transform ?? null, viewer: s.viewer ?? null,
+    // only sent when there is one, so a database without migration_geo.sql still takes the stroke
+    ...(s.geo ? { geo: s.geo } : {}),
   };
   try {
     const { error } = await supabase.from('strokes').insert(row);

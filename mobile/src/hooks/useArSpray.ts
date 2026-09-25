@@ -193,7 +193,7 @@ export function useArSpray(pose: React.MutableRefObject<Pose>, opts: { onStrokeS
     const s: Stroke = {
       id: a.id, canvas_id: canvas.id, author_id: st.painter?.id ?? null, author_name: st.painter?.name ?? 'anon',
       color: a.color, cap: STROKE_CAP, points: a.points as StrokePoint[], paint_used: Math.round(strokePaint.current * 100) / 100,
-      created_at: new Date().toISOString(), anchor_id: a.anchorId, transform: a.transform, viewer: a.viewer ?? null,
+      created_at: new Date().toISOString(), anchor_id: a.anchorId, transform: a.transform, viewer: a.viewer ?? null, geo: a.geo ?? null,
     };
     strokePaint.current = 0;
     st.addStroke(s);

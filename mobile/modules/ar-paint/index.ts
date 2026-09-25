@@ -3,6 +3,9 @@ import type { EventSubscription } from 'expo-modules-core';
 import type { ComponentType, Ref } from 'react';
 import type { ViewProps } from 'react-native';
 
+/** Where a quad sat on Earth when it was painted (ARCore Geospatial): WGS84 degrees / metres, east-up-south quaternion [x, y, z, w]. */
+export type GeoPose = { lat: number; lng: number; alt: number; q: number[]; hAcc?: number; yawAcc?: number };
+
 export type ArStroke = {
   id: string;
   anchorId: string;
@@ -10,6 +13,8 @@ export type ArStroke = {
   color: string;
   points: number[][]; // [u, v, radiusM, alpha, kind] in the anchor's plane, metres
   viewer?: number[]; // camera world position when the stroke started (same frame as transform)
+  /** Android with Geospatial: the quad's pose on Earth, when the painter's fix was good (≤ 5 m, ≤ 10°). */
+  geo?: GeoPose;
 };
 
 export type ArTrackingEvent = {
@@ -24,6 +29,8 @@ export type ArTrackingEvent = {
   depth?: boolean;
   /** Android: the compass → north-aligned frame calibration. */
   heading?: 'calibrating' | 'ready';
+  /** Android: Geospatial status for the debug line: 'off' | 'searching' | '±1.2m ±3°'. */
+  geo?: string;
 };
 
 /** What the reticle is on: plane = detected geometry (locked), extended = known plane's extension, mesh = LiDAR (iPhone) / depth (Android), estimated = feature points. */
@@ -83,7 +90,7 @@ export const canSnapshot: boolean = !!NativeModule?.hasSnapshot;
 export const canUndo: boolean = !!NativeModule?.hasUndo;
 /** Which AR stack wrote a saved map / stroke; each platform can only relocalise against its own maps. */
 export const arPlatform: ArPlatform | null = NativeModule ? (NativeModule.platform ?? 'arkit') : null;
-/** Android: Cloud Anchors are configured (ARCore API key present), so pieces can be saved for exact re-placement. */
+/** Android: Cloud Anchors are configured (keyless auth or an ARCore API key), so pieces can be saved for exact re-placement. */
 export const hasCloudAnchors: boolean = !!NativeModule?.cloudAnchors;
 /** Path of the app's own App Group container (iOS only). */
 export const appGroupPath: string | null = (NativeModule as any)?.appGroupPath ?? null;

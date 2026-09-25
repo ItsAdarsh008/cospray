@@ -23,6 +23,7 @@ import com.google.ar.core.Camera
 import com.google.ar.core.Config
 import com.google.ar.core.Coordinates2d
 import com.google.ar.core.DepthPoint
+import com.google.ar.core.Earth
 import com.google.ar.core.Frame
 import com.google.ar.core.Plane
 import com.google.ar.core.ResolveCloudAnchorFuture
@@ -75,6 +76,12 @@ import kotlin.math.min
  * Hidden, not deleted, and the verdict is dropped the moment a quad stops being eligible: bring
  * the chair back and the paint comes back on it.
  *
+ * GEOSPATIAL: with cloud auth configured and the location permission granted, the session also runs
+ * ARCore's Geospatial API (Google's VPS, from Street View imagery: sub-metre outdoors where there is
+ * coverage). Each stroke carries its quad's WGS84 pose when the fix is good. A piece that has no
+ * usable map is placed from memory as before, then moved onto its recorded geo pose as soon as this
+ * phone's own fix is good enough, and snapped to the real wall from there. See [updateGeo].
+ *
  * FRAME: ARCore's yaw is arbitrary; [HeadingEstimator] recovers the north-aligned frame the iPhone
  * uses, and everything crossing to JS (stroke transforms, viewer positions) is expressed in it.
  *
@@ -88,6 +95,14 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
   private companion object {
     const val TAG = "ArPaint"
     const val SAVE_TIMEOUT_MS = 30_000L
+
+    // ---- Geospatial (see updateGeo) ----
+    /** Record a stroke's geo pose only when VPS has this phone at least this well. */
+    const val GEO_RECORD_MAX_H_M = 5f
+    const val GEO_RECORD_MAX_YAW_DEG = 10f
+    /** Move a piece placed from memory onto its geo pose once our own fix is at least this good. */
+    const val GEO_PLACE_MAX_H_M = 3f
+    const val GEO_PLACE_MAX_YAW_DEG = 8f
 
     // ---- surface verification (see verifySurfaces) ----
     /** Anything whose smaller side is under this can be picked up and carried off: a chair, a box,
@@ -171,6 +186,11 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
   @Volatile private var cloudEnabled = false
   /** Cloud Anchor lifetime for this build's auth: 365 days keyless, 1 day with an API key. */
   private var hostTtlDays = 1
+  @Volatile private var geoEnabled = false
+  /** This phone's current geospatial accuracy (horizontal metres, yaw degrees); NaN while not tracking. */
+  @Volatile private var geoH = Float.NaN
+  @Volatile private var geoYaw = Float.NaN
+  private var geoStateLogged: Earth.EarthState? = null
   @Volatile private var depthEnabled = false
   @Volatile private var displayRotation = Surface.ROTATION_0
 
@@ -355,7 +375,21 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
     cloudEnabled = ArSupport.hasCloudAuth(context)
     hostTtlDays = ArSupport.hostTtlDays(context)
     cfg.cloudAnchorMode = if (cloudEnabled) Config.CloudAnchorMode.ENABLED else Config.CloudAnchorMode.DISABLED
-    s.configure(cfg)
+    // Geospatial rides on the same auth, and ARCore refuses to configure it without fine location.
+    geoEnabled = cloudEnabled &&
+      context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED &&
+      try { s.isGeospatialModeSupported(Config.GeospatialMode.ENABLED) } catch (_: Exception) { false }
+    cfg.geospatialMode = if (geoEnabled) Config.GeospatialMode.ENABLED else Config.GeospatialMode.DISABLED
+    try {
+      s.configure(cfg)
+    } catch (e: Exception) {
+      if (!geoEnabled) throw e
+      // never lose AR over Geospatial: run without it
+      Log.w(TAG, "Geospatial configure failed, continuing without it", e)
+      geoEnabled = false
+      cfg.geospatialMode = Config.GeospatialMode.DISABLED
+      s.configure(cfg)
+    }
   }
 
   fun destroy() {
@@ -579,6 +613,7 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
     heading.addFrame(-M.col(M.fromPose(camera.displayOrientedPose), 2))
 
     updatePlanes(frame, now)
+    updateGeo()
     updateQuadPoses(now)
     verifySurfaces(frame, now)
 
@@ -1137,6 +1172,66 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
     return null
   }
 
+  // ---- Geospatial --------------------------------------------------------------------------
+
+  private fun earth(): Earth? = if (geoEnabled) session?.earth else null
+
+  /**
+   * Keep this phone's geospatial accuracy current, and move pieces placed from memory onto the geo
+   * pose their painter recorded as soon as our own fix is good enough (GEO_PLACE_*). Placed from
+   * memory is metres out (GPS + compass); a VPS fix is typically well under a metre. The quad stays
+   * `loose`, so it then snaps onto the real wall within 0.6 m exactly like any other.
+   */
+  private fun updateGeo() {
+    val e = earth()
+    if (e == null) { geoH = Float.NaN; geoYaw = Float.NaN; return }
+    if (e.earthState != Earth.EarthState.ENABLED && geoStateLogged != e.earthState) {
+      geoStateLogged = e.earthState
+      Log.w(TAG, "Geospatial unavailable: ${e.earthState}") // e.g. ERROR_NOT_AUTHORIZED: see goal2.md section 2
+    }
+    if (e.trackingState != TrackingState.TRACKING) { geoH = Float.NaN; geoYaw = Float.NaN; return }
+    val cam = e.cameraGeospatialPose
+    geoH = cam.horizontalAccuracy.toFloat()
+    geoYaw = cam.orientationYawAccuracy.toFloat()
+    if (!(geoH <= GEO_PLACE_MAX_H_M && geoYaw <= GEO_PLACE_MAX_YAW_DEG)) return
+    for (q in quads.values) {
+      val g = q.geo ?: continue
+      if (q.geoPlaced || !q.placed || q.cloudId != null) continue
+      val a = try { e.createAnchor(g.lat, g.lng, g.alt, g.q[0], g.q[1], g.q[2], g.q[3]) } catch (ex: Exception) {
+        Log.w(TAG, "geo anchor failed for ${q.id}", ex); q.geoPlaced = true; continue
+      }
+      if (a.trackingState != TrackingState.TRACKING) { a.detach(); continue } // try again next frame
+      q.geoPlaced = true
+      if (q.anchor != null && q.anchor !== q.hostAnchor) q.anchor?.detach()
+      q.anchor = a
+      q.anchorOffset = null
+      q.transform = M.fromPose(a.pose)
+      q.plane = null
+      q.loose = true
+      attachLooseToNearbyPlane(q)
+      emitSurface(mapOf("id" to q.id, "count" to quads.size, "restored" to true))
+    }
+  }
+
+  /** The quad's pose on Earth, for sharing with a stroke, only when this phone's fix is good enough to be worth keeping. */
+  private fun geoOf(q: PaintQuad): Map<String, Any>? {
+    val e = earth() ?: return null
+    if (e.trackingState != TrackingState.TRACKING) return null
+    if (!(geoH <= GEO_RECORD_MAX_H_M && geoYaw <= GEO_RECORD_MAX_YAW_DEG)) return null
+    val g = try { e.getGeospatialPose(M.toPose(q.transform)) } catch (ex: Exception) { return null }
+    return mapOf(
+      "lat" to g.latitude, "lng" to g.longitude, "alt" to g.altitude,
+      "q" to g.eastUpSouthQuaternion.map { it.toDouble() },
+      "hAcc" to geoH.toDouble(), "yawAcc" to geoYaw.toDouble(),
+    )
+  }
+
+  private fun geoLabel(): String = when {
+    !geoEnabled -> "off"
+    geoH.isNaN() -> "searching"
+    else -> "±%.1fm ±%.0f°".format(geoH, geoYaw)
+  }
+
   // ---- paint loop --------------------------------------------------------------------------
 
   private fun beginStroke() {
@@ -1152,14 +1247,16 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
     q.record(PaintQuad.Painted(s.id, colorOf(s.color), s.points.map { p -> FloatArray(p.size) { i -> p[i].toFloat() } }))
     myStrokes.add(q.id to s.id)
     q.upload(SystemClock.elapsedRealtime(), force = true)
-    emitStrokeEnd(mapOf(
+    val body = mapOf(
       "id" to s.id,
       "anchorId" to q.id,
       "transform" to M.flatten(M.mul(heading.toNorth(), q.transform)),
       "color" to s.color,
       "points" to s.points.toList(),
       "viewer" to s.viewer,
-    ))
+    )
+    val geo = geoOf(q)
+    emitStrokeEnd(if (geo != null) body + ("geo" to geo) else body)
   }
 
   /** Pick the quad for a hit: one on the same plane containing the point, else any coplanar one, else a new one. */
@@ -1224,7 +1321,7 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
 
   // ---- remote strokes ----------------------------------------------------------------------
 
-  private class RemoteStroke(val id: String, val anchorId: String, val transform: M4, val color: Int, val points: List<FloatArray>, val viewer: V3?)
+  private class RemoteStroke(val id: String, val anchorId: String, val transform: M4, val color: Int, val points: List<FloatArray>, val viewer: V3?, val geo: GeoPose?)
 
   private fun parseStroke(m: Map<String, Any?>): RemoteStroke? {
     val id = m["id"] as? String ?: return null
@@ -1234,7 +1331,17 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
     val color = colorOf(hex)
     val pts = (m["points"] as? List<*>)?.mapNotNull { p -> (p as? List<*>)?.mapNotNull { (it as? Number)?.toFloat() }?.toFloatArray()?.takeIf { it.size >= 4 } } ?: return null
     val viewer = (m["viewer"] as? List<*>)?.mapNotNull { (it as? Number)?.toFloat() }?.takeIf { it.size == 3 }?.let { V3(it[0], it[1], it[2]) }
-    return RemoteStroke(id, anchorId, tf, color, pts, viewer)
+    return RemoteStroke(id, anchorId, tf, color, pts, viewer, parseGeo(m["geo"]))
+  }
+
+  private fun parseGeo(raw: Any?): GeoPose? {
+    val g = raw as? Map<*, *> ?: return null
+    val lat = (g["lat"] as? Number)?.toDouble() ?: return null
+    val lng = (g["lng"] as? Number)?.toDouble() ?: return null
+    val alt = (g["alt"] as? Number)?.toDouble() ?: return null
+    val q = (g["q"] as? List<*>)?.mapNotNull { (it as? Number)?.toFloat() }?.takeIf { it.size == 4 } ?: return null
+    if (!lat.isFinite() || !lng.isFinite() || !alt.isFinite()) return null
+    return GeoPose(lat, lng, alt, q.toFloatArray())
   }
 
   /**
@@ -1263,6 +1370,9 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
           mapAlignment != null -> q = PaintQuad(s.anchorId, M.mul(mapAlignment!!, s.transform)).also { it.loose = true }
           else -> q = PaintQuad(s.anchorId, M.mul(fromNorth, s.transform))
         }
+        // only a piece placed from memory is waiting for a better position; one resolved from a
+        // saved map already has it
+        if (mode == "relative") q.geo = s.geo
         quads[s.anchorId] = q
         if (q.placed) { anchorQuad(q); if (q.loose) attachLooseToNearbyPlane(q) }
       }
@@ -1422,7 +1532,7 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
         }
       } catch (_: Exception) { "" }
     }
-    val key = state + reason + mapping
+    val key = state + reason + mapping + geoLabel()
     if (key == lastTrackingKey && now - lastTrackingEvent < 2000) return
     lastTrackingKey = key
     lastTrackingEvent = now
@@ -1430,6 +1540,7 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
     emitTracking(mapOf(
       "state" to state, "reason" to reason, "mapping" to mapping, "planes" to planeCount, "surfaces" to quads.size,
       "lidar" to false, "depth" to depthEnabled, "heading" to if (heading.locked) "ready" else "calibrating",
+      "geo" to geoLabel(),
     ))
   }
 

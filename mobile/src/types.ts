@@ -1,4 +1,5 @@
 import type { Cap } from './config';
+import type { GeoPose } from '../modules/ar-paint';
 
 /** [yaw, pitch, size(deg), alpha, kind] — kind 0 = spray dab centre, 1 = a drip from an older build (never drawn now). Canvas-relative degrees. */
 export type StrokePoint = [number, number, number, number, number];
@@ -21,6 +22,8 @@ export type Stroke = {
   transform?: number[] | null;
   /** AR strokes: camera world position [x,y,z] when sprayed, so other clients project from where the painter stood. */
   viewer?: number[] | null;
+  /** AR strokes (Android + Geospatial): the quad's WGS84 pose, so any phone with a VPS fix can place it exactly. */
+  geo?: GeoPose | null;
 };
 
 export type Canvas = {

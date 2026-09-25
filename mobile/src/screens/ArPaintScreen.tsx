@@ -159,7 +159,7 @@ export function ArPaintScreen({ active = true }: { active?: boolean }) {
       const d = haversineM(location.lat, location.lng, c.lat, c.lng);
       if (d >= CANVAS_JOIN_RADIUS_M) continue;
       if (worldMapUsable(c)) { if (d < bestD) { best = c; bestD = d; } }
-      else if ((st.strokes[c.id] ?? []).some((s) => s.anchor_id && s.viewer) && d < approxD) { approx = c; approxD = d; }
+      else if ((st.strokes[c.id] ?? []).some((s) => s.anchor_id && (s.viewer || s.geo)) && d < approxD) { approx = c; approxD = d; }
     }
     if (best) {
       mapCanvas.current = best;
@@ -175,9 +175,9 @@ export function ArPaintScreen({ active = true }: { active?: boolean }) {
     const c = engine.activeCanvas.current;
     if (!c || s.canvas_id !== c.id || !s.anchor_id || !s.transform) return;
     if (s.author_id && s.author_id === painter?.id) return;
-    const stroke = { id: s.id, anchorId: s.anchor_id, transform: s.transform, color: s.color, points: s.points as number[][], viewer: s.viewer ?? undefined };
+    const stroke = { id: s.id, anchorId: s.anchor_id, transform: s.transform, color: s.color, points: s.points as number[][], viewer: s.viewer ?? undefined, geo: s.geo ?? undefined };
     // a stroke from the other platform is in a frame we can't share: place it from the painter's viewpoint
-    if (strokePlatform(s.anchor_id) !== arPlatform) { if (s.viewer) viewRef.current?.addStrokes([stroke], 'relative').catch(() => {}); return; }
+    if (strokePlatform(s.anchor_id) !== arPlatform) { if (s.viewer || s.geo) viewRef.current?.addStrokes([stroke], 'relative').catch(() => {}); return; }
     viewRef.current?.addStrokes([stroke]).catch(() => {});
   }), [painter?.id]);
 
@@ -200,7 +200,7 @@ export function ArPaintScreen({ active = true }: { active?: boolean }) {
       if (keep.length >= MAX_REPLAY_STROKES) break;
     }
     return keep.reverse() // back to paint order, so later strokes sit on top
-      .map((s) => ({ id: s.id, anchorId: s.anchor_id!, transform: s.transform!, color: s.color, points: s.points as number[][], viewer: s.viewer ?? undefined }));
+      .map((s) => ({ id: s.id, anchorId: s.anchor_id!, transform: s.transform!, color: s.color, points: s.points as number[][], viewer: s.viewer ?? undefined, geo: s.geo ?? undefined }));
   };
 
   /** No usable world map: fresh session, strokes placed from the painter's viewpoint relative to ours. */
@@ -211,7 +211,7 @@ export function ArPaintScreen({ active = true }: { active?: boolean }) {
     try {
       await viewRef.current?.resetSession();
       setWorldMapPath(null);
-      const ss = arStrokes(c).filter((s) => s.viewer);
+      const ss = arStrokes(c).filter((s) => s.viewer || s.geo);
       setTimeout(() => { if (ss.length) viewRef.current?.addStrokes(ss, 'relative').catch(() => {}); }, 1500); // let tracking initialise first
       setMapState(ss.length ? 'approx' : 'none');
       const st = useStore.getState();
@@ -229,7 +229,7 @@ export function ArPaintScreen({ active = true }: { active?: boolean }) {
       setMapState('relocalizing');
       const all = arStrokes(mapCanvas.current);
       const strokes = all.filter((s) => strokePlatform(s.anchorId) === arPlatform);
-      otherPlatformStrokes.current = all.filter((s) => strokePlatform(s.anchorId) !== arPlatform && s.viewer);
+      otherPlatformStrokes.current = all.filter((s) => strokePlatform(s.anchorId) !== arPlatform && (s.viewer || s.geo));
       if (strokes.length) viewRef.current?.addStrokes(strokes, 'absolute').catch(() => {});
       if (relocTimer.current) clearTimeout(relocTimer.current);
       relocTimer.current = setTimeout(() => {
@@ -305,7 +305,7 @@ export function ArPaintScreen({ active = true }: { active?: boolean }) {
       <CreateHud
         found={found}
         onOpenFound={() => found && setDetail(found)}
-        debug={settings.debugHud ? `planes ${tracking.planes ?? 0} · quads ${surfaces} · ${arPlatform === 'arcore' ? `${tracking.depth ? 'depth' : 'no depth'} · compass ${tracking.heading ?? '…'}` : hasLidar ? 'lidar' : 'no lidar'} · hit ${hitInfo.kind} · surf ${moved.current.gone}/${moved.current.watched} · held ${ui.held} · block ${ui.blocker ?? '-'} · gps ${location ? `±${Math.round(location.accuracy)}m` : '…'} · map ${tracking.mapping || '-'}` : null}
+        debug={settings.debugHud ? `planes ${tracking.planes ?? 0} · quads ${surfaces} · ${arPlatform === 'arcore' ? `${tracking.depth ? 'depth' : 'no depth'} · compass ${tracking.heading ?? '…'} · geo ${tracking.geo ?? '…'}` : hasLidar ? 'lidar' : 'no lidar'} · hit ${hitInfo.kind} · surf ${moved.current.gone}/${moved.current.watched} · held ${ui.held} · block ${ui.blocker ?? '-'} · gps ${location ? `±${Math.round(location.accuracy)}m` : '…'} · map ${tracking.mapping || '-'}` : null}
         onStart={engine.start}
         onEnd={engine.end}
         pieceId={pieceId}

@@ -30,6 +30,9 @@ import kotlin.math.sqrt
  *
  * All methods run on the GL thread.
  */
+/** A WGS84 pose: latitude/longitude (degrees), altitude (m, WGS84), east-up-south quaternion (x, y, z, w). */
+class GeoPose(val lat: Double, val lng: Double, val alt: Double, val q: FloatArray)
+
 class PaintQuad(val id: String, var transform: M4) {
   companion object {
     const val SIZE_M = 5f
@@ -82,6 +85,12 @@ class PaintQuad(val id: String, var transform: M4) {
   var savedNorth: M4? = null
   /** Quad pose relative to its hosted cloud anchor, from the saved map. */
   var savedOffset: M4? = null
+  /**
+   * Where the painter's phone said this quad was on Earth (Geospatial API), if it knew well enough.
+   * A quad placed from memory is moved here once this phone's own geospatial fix is good enough.
+   */
+  var geo: GeoPose? = null
+  var geoPlaced = false
 
   val center: V3 get() = M.pos(transform)
   val normal: V3 get() = M.col(transform, 1).normalized()

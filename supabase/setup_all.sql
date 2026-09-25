@@ -10,12 +10,13 @@
 --   migration_security.sql report weighting, locked counters, view dedupe, limits
 --   migration_worldmaps_owned.sql  world maps writable only in the uploader's folder
 --   migration_strokes_v2.sql       binary stroke points (points_bin)
+--   migration_geo.sql              strokes.geo (ARCore Geospatial pose)
 --   seed.sql               optional demo pieces around E7
 -- Edit those files, not this one: scripts/gen_setup_sql.mjs rebuilds it.
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
--- 1/7  schema.sql
+-- 1/8  schema.sql
 -- ----------------------------------------------------------------------------
 
 -- Tagged: shared AR graffiti. Paste this whole file into the Supabase SQL editor and run it.
@@ -160,7 +161,7 @@ do $$ begin
 exception when duplicate_object then null; end $$;
 
 -- ----------------------------------------------------------------------------
--- 2/7  migration_ar.sql
+-- 2/8  migration_ar.sql
 -- ----------------------------------------------------------------------------
 
 -- AR anchoring: strokes now carry their ARKit anchor + transform, canvases carry a saved ARWorldMap.
@@ -199,7 +200,7 @@ drop policy if exists "delete own stroke" on strokes;
 create policy "delete own stroke" on strokes for delete using (auth.uid() = author_id);
 
 -- ----------------------------------------------------------------------------
--- 3/7  migration_upvotes.sql
+-- 3/8  migration_upvotes.sql
 -- ----------------------------------------------------------------------------
 
 -- Upvotes on pieces (a piece = one canvas, never a single stroke).
@@ -325,7 +326,7 @@ update canvases c set upvotes = 0
 where c.upvotes <> 0 and not exists (select 1 from upvotes u where u.canvas_id = c.id);
 
 -- ----------------------------------------------------------------------------
--- 4/7  migration_security.sql
+-- 4/8  migration_security.sql
 -- ----------------------------------------------------------------------------
 
 -- Security hardening for a public launch. Run after schema.sql, migration_ar.sql and
@@ -537,7 +538,7 @@ begin
 end $$;
 
 -- ----------------------------------------------------------------------------
--- 5/7  migration_worldmaps_owned.sql
+-- 5/8  migration_worldmaps_owned.sql
 -- ----------------------------------------------------------------------------
 
 -- World maps become owned by whoever uploaded them. Run after migration_ar.sql. Re-runnable.
@@ -578,7 +579,7 @@ revoke all on function set_world_map(uuid, text) from public;
 grant execute on function set_world_map(uuid, text) to authenticated;
 
 -- ----------------------------------------------------------------------------
--- 6/7  migration_strokes_v2.sql
+-- 6/8  migration_strokes_v2.sql
 -- ----------------------------------------------------------------------------
 
 -- Binary stroke points (format 1, see mobile/src/lib/strokeCodec.ts). Run after
@@ -607,7 +608,29 @@ do $$ begin
 exception when duplicate_object then null; end $$;
 
 -- ----------------------------------------------------------------------------
--- 7/7  seed.sql (optional demo pieces)
+-- 7/8  migration_geo.sql
+-- ----------------------------------------------------------------------------
+
+-- AR strokes can carry the quad's pose on Earth (ARCore Geospatial API, Android for now).
+-- Run after migration_ar.sql. Re-runnable.
+--
+-- geo = { lat, lng, alt, q: [x, y, z, w] (east-up-south), hAcc, yawAcc } — recorded only when the
+-- painter's VPS fix was within 5 m / 10 degrees. Any phone with its own good fix can then place the
+-- piece in the shared WGS84 frame instead of from GPS + compass. Clients only send the column when
+-- a stroke has one, so strokes still upload before this is run.
+
+alter table strokes add column if not exists geo jsonb;
+do $$ begin
+  alter table strokes add constraint strokes_geo_shape check (
+    geo is null or (
+      jsonb_typeof(geo -> 'lat') = 'number' and jsonb_typeof(geo -> 'lng') = 'number'
+      and jsonb_typeof(geo -> 'alt') = 'number' and jsonb_typeof(geo -> 'q') = 'array'
+      and octet_length(geo::text) < 512
+    )) not valid;
+exception when duplicate_object then null; end $$;
+
+-- ----------------------------------------------------------------------------
+-- 8/8  seed.sql (optional demo pieces)
 -- ----------------------------------------------------------------------------
 
 -- Seeded pieces around E7 (run after schema.sql). Safe to re-run: painters upsert by name.
