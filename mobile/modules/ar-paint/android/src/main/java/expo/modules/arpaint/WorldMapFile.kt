@@ -85,7 +85,8 @@ internal object ArSupport {
     val meta = context.packageManager.getApplicationInfo(context.packageName, PackageManager.GET_META_DATA).metaData
     when {
       !meta?.getString("com.google.android.ar.API_KEY").isNullOrBlank() -> Auth.API_KEY
-      meta?.get("expo.modules.arpaint.KEYLESS")?.toString() == "true" -> Auth.KEYLESS
+      // the manifest says android:value="true", which Android parses as a boolean, not a string
+      meta?.getBoolean("expo.modules.arpaint.KEYLESS", false) == true -> Auth.KEYLESS
       else -> Auth.NONE
     }
   } catch (_: Exception) {
