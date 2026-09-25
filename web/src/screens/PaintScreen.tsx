@@ -230,7 +230,7 @@ export function PaintScreen({ active, locationStatus }: Props) {
   };
 
   const onReport = useCallback((id: string) => {
-    if (!window.confirm('Report this piece?\nTwo reports hide a piece for everyone.')) return;
+    if (!window.confirm('Report this piece?\nReports from several people hide a piece for everyone.')) return;
     reportCanvas(id, useStore.getState().painter?.id ?? null, 'inappropriate')
       .catch((e: unknown) => { window.alert(`Could not send the report — ${e instanceof Error ? e.message : 'check your connection'}.`); });
   }, []);

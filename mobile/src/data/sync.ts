@@ -212,7 +212,8 @@ export async function flushPending() {
         if (c && (await ensureCanvasRow(c))) e = (await supabase.from('strokes').upsert(row, { onConflict: 'id' })).error;
       }
       if (e && SCHEMA_ERRORS.includes(e.code ?? '')) { schemaBlocked = true; keep.push(row); break; }
-      if (e && !['23503', '42501', '23505'].includes(e.code ?? '')) keep.push(row);
+      // 22023 = the stroke is over the server's size cap; like FK/RLS/duplicate it can never land
+      if (e && !['23503', '42501', '23505', '22023'].includes(e.code ?? '')) keep.push(row);
     }
     await AsyncStorage.setItem(PENDING, JSON.stringify([...keep, ...q.slice(ROW_RETRIES)].slice(-PENDING_MAX)));
   } catch (e) {
@@ -249,7 +250,8 @@ export async function incrementViews(canvasId: string) {
 }
 
 export async function reportCanvas(canvasId: string, reporterId: string | null, reason: string) {
-  if (!hasBackend) return;
+  // reports must be signed (one per painter per piece, weighted by the reporter's standing)
+  if (!hasBackend || isLocalId(reporterId)) return;
   try {
     await supabase.from('reports').insert({ canvas_id: canvasId, reporter_id: isLocalId(reporterId) ? null : reporterId, reason });
   } catch (e) { console.warn('report failed', e); }

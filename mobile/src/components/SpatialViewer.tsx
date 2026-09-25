@@ -67,7 +67,7 @@ export function PieceDetail({ canvas: c, onClose }: { canvas: CanvasT; onClose: 
   const colors = [...new Set(strokes.map((s) => s.color))].slice(0, 8);
   const mapsUrl = `https://maps.apple.com/?ll=${c.lat},${c.lng}&q=${encodeURIComponent(c.title ?? 'Cospray piece')}`;
   const canReport = !isMock(c.id) && c.author_id !== me?.id;
-  const report = () => Alert.alert('Report this piece?', 'Two reports hide a piece for everyone.', [
+  const report = () => Alert.alert('Report this piece?', 'Reports from several people hide a piece for everyone. You can report each piece once.', [
     { text: 'Cancel', style: 'cancel' },
     { text: 'Report', style: 'destructive', onPress: () => { reportCanvas(c.id, me?.id ?? null, 'inappropriate'); onClose(); } },
   ]);

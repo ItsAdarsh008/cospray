@@ -1,4 +1,4 @@
-// Rebuilds supabase/setup_all.sql from the three SQL files, so the backend can be set up with a
+// Rebuilds supabase/setup_all.sql from the SQL files listed below, so the backend can be set up with a
 // single paste into the Supabase SQL editor. Run after editing any of them:
 //   node scripts/gen_setup_sql.mjs
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -6,22 +6,27 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const sql = join(dirname(fileURLToPath(import.meta.url)), '..', 'supabase');
+// Order matters: each migration assumes the ones above it have run.
 const files = [
-  ['schema.sql', '1/3  schema.sql'],
-  ['migration_ar.sql', '2/3  migration_ar.sql'],
-  ['seed.sql', '3/3  seed.sql (optional demo pieces)'],
-];
+  ['schema.sql', 'schema.sql'],
+  ['migration_ar.sql', 'migration_ar.sql'],
+  ['migration_upvotes.sql', 'migration_upvotes.sql'],
+  ['migration_security.sql', 'migration_security.sql'],
+  ['seed.sql', 'seed.sql (optional demo pieces)'],
+].map(([name, title], i, all) => [name, `${i + 1}/${all.length}  ${title}`]);
 
 const rule = '-- ' + '-'.repeat(76);
 const header = `-- ${'='.repeat(76)}
 -- Fresco — one-paste backend setup. Supabase SQL Editor -> New query -> paste
 -- this whole file -> Run. Safe to re-run.
 --
--- Generated from, and kept identical to, the three files it concatenates:
---   1. schema.sql       tables, triggers, RLS, RPCs, realtime
---   2. migration_ar.sql the AR half: anchor_id / transform / viewer, the
---                       worldmaps bucket, set_world_map, the undo delete policy
---   3. seed.sql         optional demo pieces around E7
+-- Generated from, and kept identical to, the files it concatenates:
+--   schema.sql             tables, triggers, RLS, RPCs, realtime
+--   migration_ar.sql       the AR half: anchor_id / transform / viewer, the
+--                          worldmaps bucket, set_world_map, the undo delete policy
+--   migration_upvotes.sql  upvotes table + toggle_upvote / top_pieces
+--   migration_security.sql report weighting, locked counters, view dedupe, limits
+--   seed.sql               optional demo pieces around E7
 -- Edit those files, not this one: scripts/gen_setup_sql.mjs rebuilds it.
 -- ${'='.repeat(76)}
 

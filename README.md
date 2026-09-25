@@ -234,7 +234,7 @@ show an info chip + report button.
 | `painters` | `id` = Supabase auth user id, unique `name` (your tag); `paint_used`, `strokes` kept by trigger |
 | `canvases` | lat/lng + `heading`, author, `views`, `stroke_count`, `flags`/`flagged` |
 | `strokes` | `canvas_id`, colour, cap, `points` jsonb `[[yaw,pitch,size,alpha,kind],…]`, `paint_used` |
-| `reports` | trigger bumps `canvases.flags`; 2 reports → `flagged` (hidden everywhere) |
+| `reports` | one per painter per piece; trigger bumps `canvases.flags` and sets `flagged` (hidden everywhere) once trust-weighted reports reach max(3, 2% of views) — see `migration_security.sql` |
 
 RPCs: `nearby_canvases(lat,lng,radius_m)` (haversine), `increment_views(cid)`. Undo deletes a stroke row, which needs the `delete own stroke` policy. Realtime on
 `strokes`/`canvases` inserts so a second phone sees strokes live; polling every 15 s as backup.
