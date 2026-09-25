@@ -305,7 +305,7 @@ export function ArPaintScreen({ active = true }: { active?: boolean }) {
       <CreateHud
         found={found}
         onOpenFound={() => found && setDetail(found)}
-        debug={settings.debugHud ? `planes ${tracking.planes ?? 0} · quads ${surfaces} · ${arPlatform === 'arcore' ? `${tracking.depth ? 'depth' : 'no depth'} · compass ${tracking.heading ?? '…'} · geo ${tracking.geo ?? '…'}` : hasLidar ? 'lidar' : 'no lidar'} · hit ${hitInfo.kind} · surf ${moved.current.gone}/${moved.current.watched} · held ${ui.held} · block ${ui.blocker ?? '-'} · gps ${location ? `±${Math.round(location.accuracy)}m` : '…'} · map ${tracking.mapping || '-'}` : null}
+        debug={settings.debugHud ? `planes ${tracking.planes ?? 0} · quads ${surfaces} · ${arPlatform === 'arcore' ? `${tracking.depth ? 'depth' : 'no depth'} · compass ${tracking.heading ?? '…'} · geo ${tracking.geo ?? '…'} · occl ${tracking.occl ?? '…'}` : hasLidar ? 'lidar' : 'no lidar'} · hit ${hitInfo.kind} · surf ${moved.current.gone}/${moved.current.watched} · held ${ui.held} · block ${ui.blocker ?? '-'} · gps ${location ? `±${Math.round(location.accuracy)}m` : '…'} · map ${tracking.mapping || '-'}` : null}
         onStart={engine.start}
         onEnd={engine.end}
         pieceId={pieceId}

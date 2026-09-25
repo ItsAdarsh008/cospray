@@ -31,6 +31,8 @@ export type ArTrackingEvent = {
   heading?: 'calibrating' | 'ready';
   /** Android: Geospatial status for the debug line: 'off' | 'searching' | '±1.2m ±3°'. */
   geo?: string;
+  /** Android: occlusion sources for the debug line, e.g. 'depth ✓ · ppl 12% 38ms'. */
+  occl?: string;
 };
 
 /** What the reticle is on: plane = detected geometry (locked), extended = known plane's extension, mesh = LiDAR (iPhone) / depth (Android), estimated = feature points. */

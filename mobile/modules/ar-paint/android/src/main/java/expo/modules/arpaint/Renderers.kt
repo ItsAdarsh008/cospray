@@ -244,6 +244,7 @@ internal class QuadRenderer {
   private var pPos = 0; private var pTex = 0; private var pMvp = 0; private var pSampler = 0
   private var pModelView = 0; private var pDepth = 0; private var pUseDepth = 0; private var pViewport = 0
   private var pUvO = 0; private var pUvX = 0; private var pUvY = 0
+  private var pMask = 0; private var pUseMask = 0
   private val modelView = FloatArray(16)
   private var rPos = 0; private var rMvp = 0; private var rColor = 0
   private val mvp = FloatArray(16)
@@ -285,19 +286,33 @@ internal class QuadRenderer {
       uniform vec2 u_UvO;
       uniform vec2 u_UvX;
       uniform vec2 u_UvY;
+      uniform sampler2D u_Mask;  // people / hands, indexed by view-normalised coordinates
+      uniform float u_UseMask;
       void main() {
         vec4 c = texture2D(u_Tex, v_Tex); // bitmap is premultiplied
-        if (u_UseDepth > 0.5 && c.a > 0.0) {
+        if (c.a > 0.0 && (u_UseDepth > 0.5 || u_UseMask > 0.5)) {
           vec2 vn = vec2(gl_FragCoord.x / u_Viewport.x, 1.0 - gl_FragCoord.y / u_Viewport.y);
-          vec4 t = texture2D(u_Depth, u_UvO + vn.x * u_UvX + vn.y * u_UvY);
-          float scene = (t.r * 255.0 + t.a * 255.0 * 256.0) / 1000.0;
-          if (scene > 0.0) {
-            // Depth-from-motion is noisy, and worse with range: the wall the paint is on must never
-            // hide it. Only something clearly in front (a margin that grows with distance) does,
-            // and it feathers over 10 cm so the edge of a passer-by doesn't flicker.
-            float margin = 0.12 + 0.06 * v_Depth;
-            c *= smoothstep(v_Depth - margin - 0.1, v_Depth - margin, scene);
+          float scene = 0.0;
+          float vis = 1.0;
+          if (u_UseDepth > 0.5) {
+            vec4 t = texture2D(u_Depth, u_UvO + vn.x * u_UvX + vn.y * u_UvY);
+            scene = (t.r * 255.0 + t.a * 255.0 * 256.0) / 1000.0;
+            if (scene > 0.0) {
+              // Depth-from-motion is noisy, and worse with range: the wall the paint is on must
+              // never hide it. Only something clearly in front (a margin that grows with distance)
+              // does, feathered over 10 cm so the edge of a passer-by doesn't flicker.
+              float margin = 0.12 + 0.06 * v_Depth;
+              vis = smoothstep(v_Depth - margin - 0.1, v_Depth - margin, scene);
+            }
           }
+          if (u_UseMask > 0.5) {
+            // A person or a hand is in front of the paint, unless depth clearly puts them behind it
+            // (someone standing further off than paint on the floor near you).
+            float person = texture2D(u_Mask, vn).r;
+            if (scene > v_Depth + 0.3) person = 0.0;
+            vis *= 1.0 - smoothstep(0.35, 0.65, person);
+          }
+          c *= vis;
         }
         gl_FragColor = c;
       }
@@ -314,6 +329,8 @@ internal class QuadRenderer {
     pUvO = GLES20.glGetUniformLocation(paintProgram, "u_UvO")
     pUvX = GLES20.glGetUniformLocation(paintProgram, "u_UvX")
     pUvY = GLES20.glGetUniformLocation(paintProgram, "u_UvY")
+    pMask = GLES20.glGetUniformLocation(paintProgram, "u_Mask")
+    pUseMask = GLES20.glGetUniformLocation(paintProgram, "u_UseMask")
 
     reticleProgram = Gl.program(
       """
@@ -359,22 +376,30 @@ internal class QuadRenderer {
     rColor = GLES20.glGetUniformLocation(reticleProgram, "u_Color")
   }
 
-  /** [depth]: occlude against it (null = draw paint over everything, as before). */
-  fun beginPaint(depth: DepthTexture?, viewportW: Int, viewportH: Int) {
+  /** Occlude against [depth] and/or [people] when they are fresh (null = not available on this phone). */
+  fun beginPaint(depth: DepthTexture?, people: PeopleMask?, viewportW: Int, viewportH: Int) {
     GLES20.glEnable(GLES20.GL_BLEND)
     GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
     GLES20.glDisable(GLES20.GL_CULL_FACE)
     GLES20.glUseProgram(paintProgram)
-    val occlude = depth != null && depth.ready && viewportW > 0 && viewportH > 0
+    val sized = viewportW > 0 && viewportH > 0
+    val occlude = sized && depth != null && depth.ready
+    val mask = sized && people != null && people.ready
     GLES20.glUniform1f(pUseDepth, if (occlude) 1f else 0f)
+    GLES20.glUniform1f(pUseMask, if (mask) 1f else 0f)
+    GLES20.glUniform2f(pViewport, viewportW.toFloat(), viewportH.toFloat())
     if (occlude) {
       GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
       GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, depth!!.textureId)
       GLES20.glUniform1i(pDepth, 1)
-      GLES20.glUniform2f(pViewport, viewportW.toFloat(), viewportH.toFloat())
       GLES20.glUniform2f(pUvO, depth.uvO[0], depth.uvO[1])
       GLES20.glUniform2f(pUvX, depth.uvX[0], depth.uvX[1])
       GLES20.glUniform2f(pUvY, depth.uvY[0], depth.uvY[1])
+    }
+    if (mask) {
+      GLES20.glActiveTexture(GLES20.GL_TEXTURE2)
+      GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, people!!.textureId)
+      GLES20.glUniform1i(pMask, 2)
     }
     GLES20.glActiveTexture(GLES20.GL_TEXTURE0) // per-quad paint textures bind to unit 0
     GLES20.glUniform1i(pSampler, 0)

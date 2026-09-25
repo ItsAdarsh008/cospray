@@ -71,8 +71,9 @@ import kotlin.math.min
  *
  * OCCLUSION: with the Depth API on, the paint shader compares each fragment's distance against
  * ARCore's depth map and fades out wherever something real is clearly in front of it: a person
- * walking past, a pole, the near edge of a pillar. See [DepthTexture]. Always on: real paint
- * behind something is not visible, so neither is this.
+ * walking past, a pole, the near edge of a pillar. See [DepthTexture]. Depth-from-motion misses
+ * things that move or are very close (a hand), so people and hands are also found by segmentation
+ * in the colour image ([PeopleMask]). Always on: real paint behind something is not visible.
  *
  * MOVED SURFACES: ARCore assumes nothing in the world moves, so paint on a chair that gets pushed
  * away is left hanging in the air. [verifySurfaces] samples the depth map where each piece on a
@@ -225,6 +226,7 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
   private val planeRenderer = PlaneRenderer()
   private val quadRenderer = QuadRenderer()
   private val depthTexture = DepthTexture()
+  private val peopleMask = PeopleMask()
   private var viewportW = 0
   private var viewportH = 0
   private var displayChanged = true
@@ -430,6 +432,7 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
     stop()
     session?.close()
     session = null
+    peopleMask.close()
   }
 
   private fun failSave(promise: Promise?, message: String) {
@@ -599,6 +602,7 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
     planeRenderer.create()
     quadRenderer.create()
     depthTexture.create()
+    peopleMask.create()
     cameraTextureSet = false
     for (q in quads.values) q.onContextLost()
   }
@@ -658,6 +662,8 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
 
     for (q in quads.values) q.upload(now)
     if (depthEnabled) depthTexture.update(frame, now)
+    peopleMask.upload(now)
+    peopleMask.offer(frame, viewportW, viewportH, now)
     val job = snapshotJob
     if (job != null) snapshotJob = null
     drawScene(hit, now, overlays = job == null)
@@ -692,7 +698,7 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
         planeRenderer.draw(viewProj, M.fromPose(p.centerPose), p.polygon, p.type == Plane.Type.VERTICAL, opacity)
       }
     }
-    quadRenderer.beginPaint(if (depthEnabled) depthTexture else null, viewportW, viewportH)
+    quadRenderer.beginPaint(if (depthEnabled) depthTexture else null, peopleMask, viewportW, viewportH)
     // q.missing: the surface this was painted on has been carried off, so the paint goes with it
     for (q in quads.values) if (q.placed && !q.missing) quadRenderer.drawPaint(viewProj, viewM, q)
     if (hit != null && overlays) {
@@ -1281,6 +1287,10 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
     )
   }
 
+  /** Debug line: whether each occlusion source is live — "depth ✓ · ppl 12% 38ms". */
+  private fun occlusionLabel(): String =
+    (if (!depthEnabled) "depth ✗" else if (depthTexture.ready) "depth ✓" else "depth …") + " · " + peopleMask.label()
+
   private fun geoLabel(): String = when {
     !geoEnabled -> "off"
     geoH.isNaN() -> "searching"
@@ -1587,7 +1597,7 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
         }
       } catch (_: Exception) { "" }
     }
-    val key = state + reason + mapping + geoLabel()
+    val key = state + reason + mapping + geoLabel() + occlusionLabel()
     if (key == lastTrackingKey && now - lastTrackingEvent < 2000) return
     lastTrackingKey = key
     lastTrackingEvent = now
@@ -1596,6 +1606,7 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
       "state" to state, "reason" to reason, "mapping" to mapping, "planes" to planeCount, "surfaces" to quads.size,
       "lidar" to false, "depth" to depthEnabled, "heading" to if (heading.locked) "ready" else "calibrating",
       "geo" to geoLabel(),
+      "occl" to occlusionLabel(),
     ))
   }
 
