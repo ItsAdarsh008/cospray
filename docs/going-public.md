@@ -36,6 +36,17 @@ you rely on them.
    at prebuild time, Cloud Anchors **and Geospatial are off**. The geo debug readout says `geo off`.
    Setup is in `goal2.md` §2.
 
+### Verified so far
+
+- TypeScript passes in `mobile/` and `web/`. The ARCore module's Kotlin compiles. A full Android
+  debug build (arm64) succeeds and installs on the Galaxy S25, and the app launches with no JS
+  errors.
+- The stroke codec round-trips real-shaped data (a 1300-dab AR sweep and compass strokes with
+  drips, including truncated/invalid input).
+- **Windows build gotcha:** from `C:\Users\…\GitHub\cospray\cospray\mobile`, reanimated's CMake
+  output passes the 260-character path limit and ninja loops on "build.ninja still dirty". Build
+  from a short path instead (a `git worktree` at `C:\cs` works), or enable Windows long paths.
+
 ### Not verified yet
 
 - **Nothing here has run against a live database.** The SQL was written against the existing schema
