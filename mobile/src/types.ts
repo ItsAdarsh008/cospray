@@ -11,6 +11,9 @@ export type Stroke = {
   color: string;
   cap: Cap;
   points: StrokePoint[];
+  /** Wire format (lib/strokeCodec): rows from the server carry these instead of `points`; sync decodes them. */
+  points_bin?: string | null;
+  points_v?: number | null;
   paint_used: number;
   created_at: string;
   /** AR: custom ARAnchor id + its 4x4 transform (column-major) in the canvas world map. Null for compass-mode strokes. */

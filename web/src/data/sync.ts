@@ -1,3 +1,4 @@
+import { wirePoints, withPoints } from '../lib/strokeCodec';
 import { hasBackend, supabase } from '../lib/supabase';
 import { AR_MIN_DISTANCE_M, DISCOVERY_SHIMMER_RADIUS_M, MAG_DECLINATION_DEG, NEARBY_FETCH_RADIUS_M } from '../config';
 import { haversineM, wrap360, wrapDiff } from '../lib/geo';
@@ -328,7 +329,7 @@ async function fetchStrokes(ids: string[], since: string | null): Promise<Stroke
     const { data, error } = await q.order('created_at').order('id').range(from, from + PAGE - 1);
     if (error) throw error;
     const raw = (data ?? []) as unknown[];
-    out.push(...raw.filter(isStrokeRow));
+    out.push(...raw.map((r) => (r && typeof r === 'object' ? withPoints(r as Stroke) : r)).filter(isStrokeRow));
     if (raw.length < PAGE) break;
   }
   return out;
@@ -396,6 +397,9 @@ type StrokeRow = {
   points: Stroke['points']; paint_used: number; anchor_id: string | null; transform: number[] | null;
 };
 
+/** Queued rows keep readable points; they go out in the binary format (lib/strokeCodec). */
+function toWire(row: StrokeRow) { return { ...row, ...wirePoints(row.points as number[][]) }; }
+
 // ---- pending queue (per painter: RLS only lets a row's author upload it) -------------------
 
 function pendingKey(painterId: string) { return PENDING_OF + painterId; }
@@ -444,7 +448,7 @@ export async function uploadStroke(s: Stroke) {
   };
   try {
     await canvasInserts.get(s.canvas_id); // fresh spot: let the canvas row land first
-    const { error } = await supabase.from('strokes').insert(row);
+    const { error } = await supabase.from('strokes').insert(toWire(row));
     if (error) throw error;
     useStore.getState().setOnline(true);
   } catch (e) {
@@ -483,14 +487,14 @@ export async function flushPending() {
       }
       const done = new Set<string>();
       // ON CONFLICT DO NOTHING: rows that already landed are skipped without needing an UPDATE policy
-      const { error } = await supabase.from('strokes').upsert(q, { onConflict: 'id', ignoreDuplicates: true });
+      const { error } = await supabase.from('strokes').upsert(q.map(toWire), { onConflict: 'id', ignoreDuplicates: true });
       if (!error) {
         for (const r of q) done.add(r.id);
         useStore.getState().setOnline(true);
       } else {
         // one bad row must not block the rest: retry individually, drop what can never land
         for (const row of q) {
-          const { error: e1 } = await supabase.from('strokes').upsert(row, { onConflict: 'id', ignoreDuplicates: true });
+          const { error: e1 } = await supabase.from('strokes').upsert(toWire(row), { onConflict: 'id', ignoreDuplicates: true });
           if (!e1) done.add(row.id);
           else if (isPermanentError(e1)) { console.warn('dropping pending stroke that can never upload', row.id, e1.code, e1.message); done.add(row.id); }
         }
@@ -506,7 +510,8 @@ export async function flushPending() {
 
 export function subscribeRealtime() {
   if (!hasBackend) return () => {};
-  const onStroke = (row: unknown) => {
+  const onStroke = (raw: unknown) => {
+    const row = raw && typeof raw === 'object' ? withPoints(raw as Stroke) : raw;
     if (!isStrokeRow(row)) return;
     if (!useStore.getState().canvases[row.canvas_id]) return; // not nearby / unknown canvas
     applyStroke(row);

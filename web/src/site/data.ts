@@ -5,6 +5,7 @@ import { SUPABASE_KEY, SUPABASE_URL } from '../config';
 // painter session from localStorage (an expired token would turn public reads into 401s).
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
 const hasBackend = SUPABASE_URL.length > 0 && SUPABASE_KEY.length > 0;
+import { withPoints } from '../lib/strokeCodec';
 import type { Canvas, Painter, Stroke } from '../types';
 
 /** Read-only world state for the judge-facing pages. Plain fetches + one realtime channel; no auth, no store. */
@@ -24,7 +25,7 @@ export async function fetchWorld(maxCanvasesWithStrokes = 80): Promise<World> {
   for (let i = 0; i < ids.length; i += 20) {
     const { data, error } = await supabase.from('strokes').select('*').in('canvas_id', ids.slice(i, i + 20)).order('created_at');
     if (error) throw error;
-    for (const s of (data ?? []) as Stroke[]) (strokes[s.canvas_id] ??= []).push(s);
+    for (const s of (data ?? []) as Stroke[]) (strokes[s.canvas_id] ??= []).push(withPoints(s));
   }
   return { canvases, strokes, painters, live: true };
 }
@@ -33,7 +34,7 @@ export async function fetchWorld(maxCanvasesWithStrokes = 80): Promise<World> {
 export function subscribeWorld(on: { stroke: (s: Stroke) => void; canvas: (c: Canvas) => void }) {
   if (!hasBackend) return () => {};
   const ch = supabase.channel('fresco-site')
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'strokes' }, (p) => on.stroke(p.new as Stroke))
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'strokes' }, (p) => on.stroke(withPoints(p.new as Stroke)))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'canvases' }, (p) => on.canvas(p.new as Canvas))
     .subscribe();
   return () => { supabase.removeChannel(ch); };

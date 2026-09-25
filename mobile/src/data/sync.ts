@@ -5,6 +5,7 @@ import { useStore } from '../store';
 import { getWall } from '../paint/Wall';
 import { File, Paths } from 'expo-file-system';
 import { arPlatform, worldMapExtension, worldMapPlatform } from '../../modules/ar-paint';
+import { wirePoints, withPoints } from '../lib/strokeCodec';
 import type { Canvas, Painter, Stroke } from '../types';
 
 /**
@@ -67,7 +68,7 @@ export async function loadCached() {
     useStore.getState().setCanvases(canvases);
     for (const c of canvases) {
       const sraw = await AsyncStorage.getItem(CACHE_STROKES + c.id);
-      if (sraw) for (const s of JSON.parse(sraw) as Stroke[]) applyStroke(s);
+      if (sraw) for (const s of JSON.parse(sraw) as Stroke[]) applyStroke(withPoints(s));
     }
   } catch {}
 }
@@ -86,7 +87,9 @@ async function cacheCanvas(c: Canvas) {
   try {
     const all = Object.values(useStore.getState().canvases);
     await AsyncStorage.setItem(CACHE_CANVASES, JSON.stringify(all));
-    const ss = useStore.getState().strokes[c.id] ?? [];
+    // stored in the binary wire format: ~15x smaller, which matters because Android's AsyncStorage
+    // is capped at 6 MB in total and a busy wall used to blow through that on its own
+    const ss = (useStore.getState().strokes[c.id] ?? []).map((s) => ({ ...s, ...wirePoints(s.points) }));
     await AsyncStorage.setItem(CACHE_STROKES + c.id, JSON.stringify(ss));
   } catch {}
 }
@@ -107,7 +110,7 @@ async function fetchStrokes(ids: string[], since?: string): Promise<Stroke[]> {
   if (since) q = q.gt('created_at', new Date(Date.parse(since) - CURSOR_OVERLAP_MS).toISOString());
   const { data, error } = await q.order('created_at');
   if (error) throw error;
-  return data as Stroke[];
+  return (data as Stroke[]).map(withPoints);
 }
 
 export async function loadNearby(lat: number, lng: number) {
@@ -172,7 +175,7 @@ export async function uploadStroke(s: Stroke, retry = true): Promise<void> {
   if (!hasBackend) return;
   const row = {
     id: s.id, canvas_id: s.canvas_id, author_id: isLocalId(s.author_id) ? null : s.author_id,
-    author_name: s.author_name, color: s.color, cap: s.cap, points: s.points, paint_used: s.paint_used,
+    author_name: s.author_name, color: s.color, cap: s.cap, ...wirePoints(s.points), paint_used: s.paint_used,
     anchor_id: s.anchor_id ?? null, transform: s.transform ?? null, viewer: s.viewer ?? null,
   };
   try {
@@ -219,7 +222,7 @@ export async function flushPending() {
     if (!error) { await AsyncStorage.removeItem(PENDING); return; }
     if (SCHEMA_ERRORS.includes(error.code ?? '')) {
       schemaBlocked = true;
-      console.warn(`stroke upload is blocked by the database schema (${error.message}). Run supabase/migration_ar.sql, then reopen the app.`);
+      console.warn(`stroke upload is blocked by the database schema (${error.message}). Run the supabase/migration_*.sql files (or setup_all.sql), then reopen the app.`);
       if (q.length > PENDING_MAX) await AsyncStorage.setItem(PENDING, JSON.stringify(q.slice(-PENDING_MAX)));
       return;
     }
@@ -249,7 +252,7 @@ export function subscribeRealtime() {
   const ch = supabase
     .channel('tagged')
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'strokes' }, (payload) => {
-      const s = payload.new as Stroke;
+      const s = withPoints(payload.new as Stroke);
       if (!useStore.getState().canvases[s.canvas_id]) return; // not nearby / unknown canvas
       applyStroke(s);
     })
@@ -322,7 +325,7 @@ export async function fetchPreviewStrokes(ids: string[]) {
   if (error) throw error;
   const by: Record<string, Stroke[]> = {};
   for (const id of want) by[id] = [];
-  for (const s of data as Stroke[]) (by[s.canvas_id] ??= []).push(s);
+  for (const s of data as Stroke[]) (by[s.canvas_id] ??= []).push(withPoints(s));
   useStore.getState().setPreviewStrokes(by);
 }
 

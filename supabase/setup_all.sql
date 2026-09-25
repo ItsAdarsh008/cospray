@@ -9,12 +9,13 @@
 --   migration_upvotes.sql  upvotes table + toggle_upvote / top_pieces
 --   migration_security.sql report weighting, locked counters, view dedupe, limits
 --   migration_worldmaps_owned.sql  world maps writable only in the uploader's folder
+--   migration_strokes_v2.sql       binary stroke points (points_bin)
 --   seed.sql               optional demo pieces around E7
 -- Edit those files, not this one: scripts/gen_setup_sql.mjs rebuilds it.
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
--- 1/6  schema.sql
+-- 1/7  schema.sql
 -- ----------------------------------------------------------------------------
 
 -- Tagged: shared AR graffiti. Paste this whole file into the Supabase SQL editor and run it.
@@ -159,7 +160,7 @@ do $$ begin
 exception when duplicate_object then null; end $$;
 
 -- ----------------------------------------------------------------------------
--- 2/6  migration_ar.sql
+-- 2/7  migration_ar.sql
 -- ----------------------------------------------------------------------------
 
 -- AR anchoring: strokes now carry their ARKit anchor + transform, canvases carry a saved ARWorldMap.
@@ -198,7 +199,7 @@ drop policy if exists "delete own stroke" on strokes;
 create policy "delete own stroke" on strokes for delete using (auth.uid() = author_id);
 
 -- ----------------------------------------------------------------------------
--- 3/6  migration_upvotes.sql
+-- 3/7  migration_upvotes.sql
 -- ----------------------------------------------------------------------------
 
 -- Upvotes on pieces (a piece = one canvas, never a single stroke).
@@ -324,7 +325,7 @@ update canvases c set upvotes = 0
 where c.upvotes <> 0 and not exists (select 1 from upvotes u where u.canvas_id = c.id);
 
 -- ----------------------------------------------------------------------------
--- 4/6  migration_security.sql
+-- 4/7  migration_security.sql
 -- ----------------------------------------------------------------------------
 
 -- Security hardening for a public launch. Run after schema.sql, migration_ar.sql and
@@ -536,7 +537,7 @@ begin
 end $$;
 
 -- ----------------------------------------------------------------------------
--- 5/6  migration_worldmaps_owned.sql
+-- 5/7  migration_worldmaps_owned.sql
 -- ----------------------------------------------------------------------------
 
 -- World maps become owned by whoever uploaded them. Run after migration_ar.sql. Re-runnable.
@@ -577,7 +578,36 @@ revoke all on function set_world_map(uuid, text) from public;
 grant execute on function set_world_map(uuid, text) to authenticated;
 
 -- ----------------------------------------------------------------------------
--- 6/6  seed.sql (optional demo pieces)
+-- 6/7  migration_strokes_v2.sql
+-- ----------------------------------------------------------------------------
+
+-- Binary stroke points (format 1, see mobile/src/lib/strokeCodec.ts). Run after
+-- migration_security.sql. Re-runnable.
+--
+-- A dab used to be ~90 bytes of jsonb (five full-precision doubles); in points_bin it is ~4 bytes
+-- (quantised, delta-coded zigzag varints). New clients write points = null + points_bin; rows
+-- written before this keep their jsonb points, and clients read either.
+--
+-- NOTE: app builds from before this commit read only `points`, so they won't draw strokes that
+-- newer builds write. Update every test phone together.
+
+alter table strokes add column if not exists points_bin bytea;
+alter table strokes add column if not exists points_v smallint;
+alter table strokes alter column points drop not null;
+
+do $$ begin
+  alter table strokes add constraint strokes_has_points check (points is not null or points_bin is not null) not valid;
+exception when duplicate_object then null; end $$;
+-- ~6000 dabs at ≤ 10 bytes each is the most a real stroke can be; stroke_guard also caps the count.
+do $$ begin
+  alter table strokes add constraint strokes_points_bin_size check (points_bin is null or octet_length(points_bin) <= 65536) not valid;
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter table strokes add constraint strokes_points_json_size check (points is null or octet_length(points::text) <= 600000) not valid;
+exception when duplicate_object then null; end $$;
+
+-- ----------------------------------------------------------------------------
+-- 7/7  seed.sql (optional demo pieces)
 -- ----------------------------------------------------------------------------
 
 -- Seeded pieces around E7 (run after schema.sql). Safe to re-run: painters upsert by name.
