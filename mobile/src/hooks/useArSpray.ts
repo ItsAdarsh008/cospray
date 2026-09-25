@@ -73,7 +73,7 @@ export function useArSpray(pose: React.MutableRefObject<Pose>, opts: { onStrokeS
   const computeBlocker = (): Blocker => {
     const st = useStore.getState();
     if (!st.location) return 'no-location';
-    if (!st.settings.geofenceBypass && haversineM(st.location.lat, st.location.lng, GEOFENCE.lat, GEOFENCE.lng) > GEOFENCE.radiusM) return 'outside-geofence';
+    if (!(__DEV__ && st.settings.geofenceBypass) && haversineM(st.location.lat, st.location.lng, GEOFENCE.lat, GEOFENCE.lng) > GEOFENCE.radiusM) return 'outside-geofence';
     if (st.shake < SHAKE_MIN_TO_SPRAY) return 'shake';
     const side = held.current;
     if (side && st.paint[side] <= PAINT_EMPTY_THRESHOLD) return 'empty';

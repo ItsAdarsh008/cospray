@@ -2,7 +2,7 @@ import React from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useStore } from '../store';
 import { supabase } from '../lib/supabase';
-import { Btn, Chip, Divider, Panel, Screen, SheetHeader, T, Toggle } from '../ui/kit';
+import { Btn, Chip, Panel, Screen, SheetHeader, T, Toggle } from '../ui/kit';
 import { haptic } from '../ui/haptics';
 import { C, ui, uiLabel } from '../ui/theme';
 import { CREWS } from '../lib/economy';
@@ -27,7 +27,8 @@ export function SettingsScreen() {
         <Row label="Sound" value={settings.sound} onChange={(v) => setSettings({ sound: v })} />
         <Row label="Surface guide grid" sub="green and blue lines over the floors and walls AR has found" value={settings.showPlanes} onChange={(v) => setSettings({ showPlanes: v })} />
         <Row label="Debug line in Create" sub="tracking, planes, GPS accuracy" value={settings.debugHud} onChange={(v) => setSettings({ debugHud: v })} />
-        <Row label="Paint anywhere" sub="bypass the Waterloo Region geofence" value={settings.geofenceBypass} onChange={(v) => setSettings({ geofenceBypass: v })} />
+        {/* dev builds only: a release build can't switch the geofence off */}
+        {__DEV__ && <Row label="Paint anywhere" sub="bypass the Waterloo Region geofence (dev build)" value={settings.geofenceBypass} onChange={(v) => setSettings({ geofenceBypass: v })} />}
       </Panel>
 
       <Panel title="COMPASS MODE SCALE" right={<T v="eyebrow">{settings.hfov}°</T>}>
@@ -50,14 +51,17 @@ export function SettingsScreen() {
         <Static k="Web" v="open the companion site" onPress={() => { haptic.tap(); Linking.openURL('https://tagged-web.vercel.app'); }} />
       </Panel>
 
-      <Panel title="DEBUG">
-        <View style={styles.row}>
-          <Btn label="FILL CAN" size="sm" tone="dark" onPress={() => setShake(1)} />
-          <Btn label="REDO ONBOARDING" size="sm" tone="dark" onPress={() => { setSheet(null); setSettings({ onboarded: false }); }} />
-        </View>
-        <Divider />
-        <Btn label="SIGN OUT" size="sm" tone="red" onPress={() => { setSheet(null); setPainter(null); setSettings({ onboarded: false }); supabase.auth.signOut().catch(() => {}); }} />
-      </Panel>
+      {/* FILL CAN skips the shake and the paint economy; it is a testing tool, not a feature */}
+      {__DEV__ && (
+        <Panel title="DEBUG">
+          <View style={styles.row}>
+            <Btn label="FILL CAN" size="sm" tone="dark" onPress={() => setShake(1)} />
+            <Btn label="REDO ONBOARDING" size="sm" tone="dark" onPress={() => { setSheet(null); setSettings({ onboarded: false }); }} />
+          </View>
+        </Panel>
+      )}
+
+      <Btn label="SIGN OUT" size="sm" tone="red" onPress={() => { setSheet(null); setPainter(null); setSettings({ onboarded: false }); supabase.auth.signOut().catch(() => {}); }} />
     </Screen>
   );
 }
