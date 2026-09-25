@@ -15,6 +15,10 @@ android {
 }
 
 dependencies {
-  // ARCore: planes, depth hit tests, anchors, Cloud Anchors
+  // ARCore: planes, depth hit tests, anchors, Cloud Anchors, Geospatial
   implementation 'com.google.ar:core:1.56.0'
+  // keyless (OAuth) auth for Cloud Anchors / Geospatial: ARCore looks this up at runtime
+  implementation 'com.google.android.gms:play-services-auth:21.3.0'
+  // Geospatial API: ARCore reads the fused location provider through this
+  implementation 'com.google.android.gms:play-services-location:21.3.0'
 }

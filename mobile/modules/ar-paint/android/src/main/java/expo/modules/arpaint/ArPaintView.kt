@@ -79,14 +79,14 @@ import kotlin.math.min
  * uses, and everything crossing to JS (stroke transforms, viewer positions) is expressed in it.
  *
  * PERSISTENCE: ARCore has no exportable world map. saveWorldMap hosts each quad as a Cloud Anchor
- * (needs an ARCore API key) and writes their ids to a small JSON "map"; loading resolves them, and
+ * (needs keyless auth — 365-day anchors — or an API key — 1-day anchors; see app.plugin.js) and
+ * writes their ids to a small JSON "map"; loading resolves them, and
  * the first one to resolve aligns every other quad. Without a key, JS falls back to the
  * placed-from-memory path, exactly as the iPhone does when relocalisation fails.
  */
 class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, appContext), GLSurfaceView.Renderer {
   private companion object {
     const val TAG = "ArPaint"
-    const val HOST_TTL_DAYS = 1 // the maximum with API-key auth
     const val SAVE_TIMEOUT_MS = 30_000L
 
     // ---- surface verification (see verifySurfaces) ----
@@ -169,6 +169,8 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
   private var destroyed = false
   private var retryPosted = false
   @Volatile private var cloudEnabled = false
+  /** Cloud Anchor lifetime for this build's auth: 365 days keyless, 1 day with an API key. */
+  private var hostTtlDays = 1
   @Volatile private var depthEnabled = false
   @Volatile private var displayRotation = Surface.ROTATION_0
 
@@ -350,7 +352,8 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
     // Depth-from-motion (or a ToF sensor where present) makes untextured walls hit-testable.
     depthEnabled = s.isDepthModeSupported(Config.DepthMode.AUTOMATIC)
     cfg.depthMode = if (depthEnabled) Config.DepthMode.AUTOMATIC else Config.DepthMode.DISABLED
-    cloudEnabled = ArSupport.hasCloudAnchorKey(context)
+    cloudEnabled = ArSupport.hasCloudAuth(context)
+    hostTtlDays = ArSupport.hostTtlDays(context)
     cfg.cloudAnchorMode = if (cloudEnabled) Config.CloudAnchorMode.ENABLED else Config.CloudAnchorMode.DISABLED
     s.configure(cfg)
   }
@@ -439,7 +442,7 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
 
   fun saveWorldMap(path: String, promise: Promise) {
     if (session == null) return promise.reject("E_WORLDMAP", "AR session not running", null)
-    if (!cloudEnabled) return promise.reject("E_WORLDMAP", "Cloud Anchors not configured (no ARCore API key)", null)
+    if (!cloudEnabled) return promise.reject("E_WORLDMAP", "Cloud Anchors not configured (no ARCORE_AUTH=keyless or ARCORE_API_KEY at build time)", null)
     val deadline = SystemClock.elapsedRealtime() + SAVE_TIMEOUT_MS
     var started = false
     pendingSaves.add(promise)
@@ -1352,7 +1355,7 @@ class ArPaintView(context: Context, appContext: AppContext) : ExpoView(context, 
         val host = s.createAnchor(M.toPose(q.transform))
         if (q.hostAnchor != null && q.hostAnchor !== q.anchor) q.hostAnchor?.detach()
         q.hostAnchor = host
-        q.hosting = s.hostCloudAnchorAsync(host, HOST_TTL_DAYS) { cloudId, state ->
+        q.hosting = s.hostCloudAnchorAsync(host, hostTtlDays) { cloudId, state ->
           enqueue(needsTracking = false, gen = g) {
             q.hosting = null
             if (state == Anchor.CloudAnchorState.SUCCESS && cloudId != null) q.cloudId = cloudId

@@ -95,9 +95,26 @@ Platform terms, and accepting an agreement on your behalf isn't something I'll d
    npx expo run:android --device
    ```
 
-**Limitation:** an API key caps an anchor's life at **1 day**. Longer (up to a year) needs keyless
-OAuth auth — a Google Cloud OAuth client plus a small Gradle dependency, worth it only if pieces
-should outlive the demo:
+**Limitation:** an API key caps an anchor's life at **1 day**, so every piece loses its exact
+placement overnight, and the key sits in the APK where anyone can extract it. For anything public
+use **keyless auth** instead (the Gradle dependency is already in `modules/ar-paint`), which also
+covers the Geospatial API:
+
+1. Same Google Cloud project, ARCore API enabled. Also enable **ARCore API** for Geospatial (same
+   API; Geospatial rides on it).
+2. **APIs & Services → OAuth consent screen**: configure it (External, app name, your email).
+3. **Credentials → Create credentials → OAuth client ID → Android**: package name +
+   the SHA-1 of the keystore that signs the build. One client per keystore: the debug keystore
+   above for `expo run:android`, and the EAS/Play upload keystore for store builds
+   (`eas credentials` prints its SHA-1; Play App Signing has its own under *App integrity*).
+4. In `mobile/.env.local`, replace the key with:
+   ```
+   ARCORE_AUTH=keyless
+   ```
+   (the plugin drops `ARCORE_API_KEY` from the manifest when keyless is set; ARCore would
+   otherwise prefer the key).
+5. Prebuild + rebuild as in step 6. Cloud Anchors are now hosted for **365 days**.
+
 <https://developers.google.com/ar/develop/java/cloud-anchors/developer-guide-android>
 
 ## 3. Install and run
@@ -175,7 +192,7 @@ Roughly in order of what's most likely to need fixing:
 | What you see | What it means |
 |---|---|
 | Create tab shows the compass painter, not AR | Google Play Services for AR isn't installed (§1.4), or the install prompt was declined |
-| `Cloud Anchors not configured` in the logs | No ARCore API key — §2, or live with placed-from-memory |
+| `Cloud Anchors not configured` in the logs | No `ARCORE_AUTH=keyless` / `ARCORE_API_KEY` at prebuild — §2, or live with placed-from-memory |
 | Camera stays black on the Create tab | Camera permission denied; Settings → Apps → Fresco → Permissions |
 | `adb devices` shows `unauthorized` | Accept the debugging prompt on the phone; re-plug the cable if it never appeared |
 | Paint is faint or hazy | Shouldn't happen any more — a Skia paint-alpha bug that did exactly this was fixed. If you see it, say so |
@@ -191,7 +208,7 @@ eas build -p android --profile development   # produces an installable .apk
 - `app.json` has `"owner": "synaraapp"` and that account's EAS project id, so you need to be a
   member of that Expo account. Otherwise change `owner`, delete `extra.eas.projectId` and run
   `eas init` to make it your own.
-- `.env.local` doesn't travel to the cloud: add `ARCORE_API_KEY` as an EAS environment variable
+- `.env.local` doesn't travel to the cloud: add `ARCORE_AUTH` (or `ARCORE_API_KEY`) as an EAS environment variable
   (Expo dashboard → project → Environment variables), or put it in `eas.json` beside the Supabase
   values.
 

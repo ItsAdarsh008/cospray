@@ -77,12 +77,24 @@ internal object ArSupport {
     false
   }
 
-  /** Cloud Anchors need an ARCore API key in the manifest (see app.plugin.js / deploy.md). */
-  fun hasCloudAnchorKey(context: Context): Boolean = try {
+  /** How ARCore's cloud services are authorised in this build (see app.plugin.js). */
+  enum class Auth { NONE, API_KEY, KEYLESS }
+
+  fun auth(context: Context): Auth = try {
     @Suppress("DEPRECATION")
-    val info = context.packageManager.getApplicationInfo(context.packageName, PackageManager.GET_META_DATA)
-    !info.metaData?.getString("com.google.android.ar.API_KEY").isNullOrBlank()
+    val meta = context.packageManager.getApplicationInfo(context.packageName, PackageManager.GET_META_DATA).metaData
+    when {
+      !meta?.getString("com.google.android.ar.API_KEY").isNullOrBlank() -> Auth.API_KEY
+      meta?.get("expo.modules.arpaint.KEYLESS")?.toString() == "true" -> Auth.KEYLESS
+      else -> Auth.NONE
+    }
   } catch (_: Exception) {
-    false
+    Auth.NONE
   }
+
+  /** Cloud Anchors / Geospatial are usable: either kind of auth is configured. */
+  fun hasCloudAuth(context: Context) = auth(context) != Auth.NONE
+
+  /** Longest Cloud Anchor lifetime ARCore allows for this auth: 365 days keyless, 1 day with an API key. */
+  fun hostTtlDays(context: Context) = if (auth(context) == Auth.KEYLESS) 365 else 1
 }

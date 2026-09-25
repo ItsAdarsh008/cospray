@@ -20,7 +20,9 @@ class ArPaintModule : Module() {
     Constant("hasSnapshot") { true }
     Constant("hasUndo") { true }
     Constant("platform") { "arcore" }
-    Constant("cloudAnchors") { appContext.reactContext?.let { ArSupport.hasCloudAnchorKey(it) } ?: false }
+    Constant("cloudAnchors") { appContext.reactContext?.let { ArSupport.hasCloudAuth(it) } ?: false }
+    /** How long a hosted piece keeps its exact placement: 365 (keyless auth), 1 (API key), 0 (none). */
+    Constant("anchorTtlDays") { appContext.reactContext?.let { if (ArSupport.hasCloudAuth(it)) ArSupport.hostTtlDays(it) else 0 } ?: 0 }
 
     Events("onVolumeKey")
 
